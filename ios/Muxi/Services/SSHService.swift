@@ -1,5 +1,9 @@
 import Foundation
 import CLibSSH2
+import os
+
+/// libssh2 error code for EAGAIN (would-block in non-blocking mode)
+private let kLibSSH2ErrorEAGAIN: Int = -37
 
 // MARK: - SSHConnectionState
 
@@ -24,12 +28,27 @@ enum SSHAuth: Sendable {
 // MARK: - SSHError
 
 /// Errors that can occur during SSH operations.
-enum SSHError: Error, Sendable {
+enum SSHError: Error, LocalizedError, Sendable {
     case notConnected
     case authenticationFailed
     case connectionFailed(String)
     case channelError(String)
     case timeout
+
+    var errorDescription: String? {
+        switch self {
+        case .notConnected:
+            return "Not connected to a server"
+        case .authenticationFailed:
+            return "Authentication failed"
+        case .connectionFailed(let detail):
+            return "Connection failed: \(detail)"
+        case .channelError(let detail):
+            return "Channel error: \(detail)"
+        case .timeout:
+            return "Connection timed out"
+        }
+    }
 }
 
 // MARK: - SSHChannel
@@ -87,12 +106,10 @@ protocol SSHServiceProtocol: AnyObject {
 /// from the main thread.
 final class LibSSH2Channel: SSHChannel {
     private let channelPtr: OpaquePointer
-    private let sessionPtr: OpaquePointer
     private var isClosed = false
 
-    init(channel: OpaquePointer, session: OpaquePointer) {
+    init(channel: OpaquePointer) {
         self.channelPtr = channel
-        self.sessionPtr = session
     }
 
     func write(_ data: Data) throws {
@@ -158,14 +175,25 @@ final class LibSSH2Channel: SSHChannel {
 ///
 /// Uses an actor to serialize all SSH operations onto a single executor,
 /// which prevents concurrent access to the underlying C pointers. Networking
-/// runs off the main thread; the ``state`` property uses
-/// `nonisolated(unsafe)` so SwiftUI can observe it without an actor hop.
+/// runs off the main thread; the ``state`` property is protected by an
+/// `OSAllocatedUnfairLock` so it can be read safely from any isolation context.
 actor SSHService: SSHServiceProtocol {
 
-    /// Current connection state, observable from any isolation context.
-    /// Mutations are serialized on the actor; reads from SwiftUI are safe
-    /// because SwiftUI dispatches to main after observation fires.
-    nonisolated(unsafe) private(set) var state: SSHConnectionState = .disconnected
+    /// Thread-safe backing storage for the connection state.
+    private let _state = OSAllocatedUnfairLock(initialState: SSHConnectionState.disconnected)
+
+    /// Current connection state, readable from any isolation context.
+    nonisolated var state: SSHConnectionState {
+        _state.withLock { $0 }
+    }
+
+    /// Update the connection state in a thread-safe manner.
+    private func updateState(_ newState: SSHConnectionState) {
+        _state.withLock { $0 = newState }
+    }
+
+    /// Whether libssh2 global initialization succeeded.
+    private var libssh2Initialized = false
 
     /// The libssh2 session handle (`LIBSSH2_SESSION*`).
     private var session: OpaquePointer?
@@ -177,6 +205,17 @@ actor SSHService: SSHServiceProtocol {
     /// via the `onData` callback.
     private var readTask: Task<Void, Never>?
 
+    init() {
+        let rc = libssh2_init(0)
+        libssh2Initialized = (rc == 0)
+    }
+
+    deinit {
+        if libssh2Initialized {
+            libssh2_exit()
+        }
+    }
+
     // MARK: - Connect
 
     func connect(
@@ -185,15 +224,16 @@ actor SSHService: SSHServiceProtocol {
         username: String,
         auth: SSHAuth
     ) async throws {
-        state = .connecting
+        // Clean up any previous connection first.
+        if state != .disconnected {
+            await performDisconnect()
+        }
+
+        updateState(.connecting)
 
         do {
-            // Global libssh2 init (idempotent -- safe to call multiple times).
-            let initRc = libssh2_init(0)
-            guard initRc == 0 else {
-                throw SSHError.connectionFailed(
-                    "libssh2_init failed (rc=\(initRc))"
-                )
+            guard libssh2Initialized else {
+                throw SSHError.connectionFailed("libssh2 initialization failed")
             }
 
             // Create a TCP socket.
@@ -259,9 +299,9 @@ actor SSHService: SSHServiceProtocol {
             // Authenticate.
             try authenticate(session: sess, username: username, auth: auth)
 
-            state = .connected
+            updateState(.connected)
         } catch {
-            state = .error(error.localizedDescription)
+            updateState(.error(error.localizedDescription))
             throw error
         }
     }
@@ -279,11 +319,12 @@ actor SSHService: SSHServiceProtocol {
     }
 
     /// Actor-isolated disconnect logic.
-    private func performDisconnect() {
+    private func performDisconnect() async {
         readTask?.cancel()
+        await readTask?.value  // Wait for read loop to exit
         readTask = nil
         cleanupSession()
-        state = .disconnected
+        updateState(.disconnected)
     }
 
     // MARK: - Execute Command
@@ -336,9 +377,11 @@ actor SSHService: SSHServiceProtocol {
                 if libssh2_channel_eof(channel) != 0 {
                     break
                 }
-            } else {
-                // Negative return code indicates an error.
-                break
+            } else if bytesRead < 0 {
+                libssh2_channel_close(channel)
+                libssh2_channel_wait_closed(channel)
+                libssh2_channel_free(channel)
+                throw SSHError.channelError("Read failed: \(lastSessionError(sess))")
             }
         }
 
@@ -401,7 +444,7 @@ actor SSHService: SSHServiceProtocol {
         // back to the Swift concurrency runtime between reads.
         libssh2_session_set_blocking(sess, 0)
 
-        let sshChannel = LibSSH2Channel(channel: channel, session: sess)
+        let sshChannel = LibSSH2Channel(channel: channel)
 
         // Background task: continuously read from the channel and deliver
         // data to the caller's callback.
@@ -419,7 +462,7 @@ actor SSHService: SSHServiceProtocol {
                 if bytesRead > 0 {
                     let data = Data(bytes: buf, count: Int(bytesRead))
                     onData(data)
-                } else if bytesRead == -37 {  // LIBSSH2_ERROR_EAGAIN
+                } else if bytesRead == kLibSSH2ErrorEAGAIN {
                     // No data available yet -- yield briefly and retry.
                     try? await Task.sleep(for: .milliseconds(10))
                 } else if bytesRead == 0

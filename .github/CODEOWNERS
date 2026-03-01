@@ -1,0 +1,12 @@
+# Default owners for everything
+* @e16tae
+
+# Core C parsers
+/core/ @e16tae
+/ios/MuxiCore/ @e16tae
+
+# iOS app
+/ios/Muxi/ @e16tae
+
+# CI/CD
+/.github/ @e16tae

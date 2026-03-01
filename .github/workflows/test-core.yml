@@ -1,0 +1,49 @@
+name: Core Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'ios/MuxiCore/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'ios/MuxiCore/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-spm:
+    name: SPM Tests
+    runs-on: macos-14
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.2.app
+
+      - name: Run core tests (SPM)
+        run: swift test --package-path ios/MuxiCore
+
+  test-cmake:
+    name: CMake Tests
+    runs-on: macos-14
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build with CMake
+        run: |
+          cmake -B core/build -S core
+          cmake --build core/build
+
+      - name: Run CMake tests
+        working-directory: core/build
+        run: ctest --output-on-failure

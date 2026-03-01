@@ -1,0 +1,48 @@
+name: Feature Request
+description: Suggest a new feature for Muxi
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea for Muxi? We'd love to hear it!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What problem does this feature solve?
+      placeholder: I'm always frustrated when...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How do you think this should work?
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives Considered
+      description: Any other approaches you've thought about?
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Feature Area
+      options:
+        - Terminal rendering
+        - SSH connection
+        - tmux integration
+        - UI / Layout
+        - Keyboard input
+        - Server management
+        - Themes / Appearance
+        - Other
+    validations:
+      required: true

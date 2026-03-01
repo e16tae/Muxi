@@ -1,0 +1,64 @@
+name: Bug Report
+description: Report a bug in Muxi
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug! Please fill out the details below.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What happened? What did you expect?
+      placeholder: Describe the bug...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the issue?
+      placeholder: |
+        1. Connect to server...
+        2. Open tmux session...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected Area
+      options:
+        - Terminal rendering
+        - SSH connection
+        - tmux integration
+        - UI / Layout
+        - Keyboard input
+        - Server management
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: ios-version
+    attributes:
+      label: iOS Version
+      placeholder: "e.g., 17.2"
+
+  - type: input
+    id: device
+    attributes:
+      label: Device
+      placeholder: "e.g., iPhone 15, iPad Air"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant Logs
+      description: Paste any relevant log output (no passwords or private keys!)
+      render: shell

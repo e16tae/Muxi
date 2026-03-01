@@ -5,6 +5,9 @@ import os
 /// libssh2 error code for EAGAIN (would-block in non-blocking mode)
 private let kLibSSH2ErrorEAGAIN: Int = -37
 
+/// libssh2 error code for operation timeout
+private let kLibSSH2ErrorTimeout: Int32 = -14
+
 // MARK: - SSHConnectionState
 
 /// Represents the current state of an SSH connection.
@@ -252,11 +255,20 @@ actor SSHService: SSHServiceProtocol {
             }
             socketFd = fd
 
-            // Apply socket-level timeouts so connect/read/write don't block
-            // indefinitely on unreachable hosts or stalled networks.
-            var timeout = timeval(tv_sec: Int(connectionTimeout), tv_usec: 0)
-            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
-            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            // Apply socket-level timeouts so read/write don't block
+            // indefinitely on stalled networks.
+            // Note: SO_SNDTIMEO/SO_RCVTIMEO do NOT bound the connect() syscall
+            // on Darwin — TCP SYN timeout is kernel-controlled (~75s). The
+            // libssh2 session timeout (below) covers handshake/auth phases.
+            let wholeSeconds = Int(connectionTimeout)
+            let microseconds = Int32((connectionTimeout - Double(wholeSeconds)) * 1_000_000)
+            var timeout = timeval(tv_sec: wholeSeconds, tv_usec: microseconds)
+            if setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) != 0 {
+                // Non-fatal: proceed without send timeout
+            }
+            if setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) != 0 {
+                // Non-fatal: proceed without receive timeout
+            }
 
             // Resolve the host.
             var hints = addrinfo()
@@ -300,8 +312,10 @@ actor SSHService: SSHServiceProtocol {
             session = sess
 
             // Apply a session-level timeout (in milliseconds) so that
-            // libssh2 operations like handshake and auth also respect the
-            // configured limit.
+            // libssh2 blocking operations (handshake, auth) respect the
+            // configured limit. This timeout is inactive in non-blocking mode
+            // (the shell read loop), where the caller's own poll loop controls
+            // timing.
             libssh2_session_set_timeout(sess, Int(connectionTimeout * 1000))
 
             // Blocking mode for the handshake and authentication.
@@ -311,6 +325,9 @@ actor SSHService: SSHServiceProtocol {
             guard hsRc == 0 else {
                 let msg = lastSessionError(sess)
                 cleanupSession()
+                if hsRc == kLibSSH2ErrorTimeout {
+                    throw SSHError.timeout
+                }
                 throw SSHError.connectionFailed(
                     "SSH handshake failed: \(msg)"
                 )

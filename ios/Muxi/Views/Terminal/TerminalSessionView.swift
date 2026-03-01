@@ -1,4 +1,5 @@
 import SwiftUI
+import os
 
 /// The terminal session screen that combines all terminal-related components
 /// into a single view: pane container, extended keyboard, quick action button,
@@ -10,6 +11,7 @@ struct TerminalSessionView: View {
     let sessionName: String
     let themeManager: ThemeManager
 
+    private let logger = Logger(subsystem: "com.muxi.app", category: "TerminalSession")
     @State private var activePaneId: String?
     @State private var inputHandler = InputHandler()
 
@@ -110,8 +112,10 @@ struct TerminalSessionView: View {
         // Encode each byte as a hex key for send-keys
         let hexKeys = data.map { String(format: "0x%02x", $0) }.joined(separator: " ")
         let command = "send-keys -t \(paneId) \(hexKeys)\n"
-        if let cmdData = command.data(using: .utf8) {
-            try? channel.write(cmdData)
+        do {
+            try channel.write(Data(command.utf8))
+        } catch {
+            logger.error("Failed to send keys to pane \(paneId): \(error.localizedDescription)")
         }
     }
 
@@ -119,8 +123,10 @@ struct TerminalSessionView: View {
     private func sendTmuxCommand(_ command: String) {
         guard let channel = connectionManager.activeChannel else { return }
         let fullCommand = command + "\n"
-        if let data = fullCommand.data(using: .utf8) {
-            try? channel.write(data)
+        do {
+            try channel.write(Data(fullCommand.utf8))
+        } catch {
+            logger.error("Failed to send tmux command: \(error.localizedDescription)")
         }
     }
 }

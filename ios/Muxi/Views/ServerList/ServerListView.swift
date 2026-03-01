@@ -20,6 +20,12 @@ struct ServerListView: View {
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
+                        // Clean up Keychain secrets before deleting the model
+                        let keychainService = KeychainService()
+                        try? keychainService.deletePassword(account: server.id.uuidString)
+                        if case .key(let keyId) = server.authMethod {
+                            try? keychainService.deleteSSHKey(id: keyId)
+                        }
                         modelContext.delete(server)
                         try? modelContext.save()
                     } label: {

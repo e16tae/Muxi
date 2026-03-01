@@ -23,6 +23,7 @@ static void safe_copy(char *dst, size_t dst_size, const char *src, size_t len) {
  * Copy a NUL-terminated string into a fixed-size buffer.
  */
 static void safe_strcpy(char *dst, size_t dst_size, const char *src) {
+    if (!src) { if (dst_size > 0) dst[0] = '\0'; return; }
     safe_copy(dst, dst_size, src, strlen(src));
 }
 

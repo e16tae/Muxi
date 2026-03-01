@@ -498,3 +498,139 @@ import CVTParser
     let written = vt_parser_get_line(&parser, 100, &buf, 256)
     #expect(written == 0)
 }
+
+// MARK: - Scroll Down Tests
+
+@Test func testScrollDown() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 5)
+    defer { vt_parser_destroy(&parser) }
+
+    // Write lines 0-4
+    let text = "Line0\r\nLine1\r\nLine2\r\nLine3\r\nLine4"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // CSI T — scroll down 1 line (insert blank at top, push content down)
+    let scrollDown = "\u{1B}[T"
+    vt_parser_feed(&parser, scrollDown, Int32(scrollDown.utf8.count))
+
+    var buf = [CChar](repeating: 0, count: 256)
+    // Row 0 should now be blank (scroll_down inserts at top)
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    #expect(String(cString: buf) == "")
+
+    // Row 1 should have the old row 0 content
+    vt_parser_get_line(&parser, 1, &buf, 256)
+    #expect(String(cString: buf) == "Line0")
+}
+
+// MARK: - CSI Insert/Delete Lines Tests
+
+@Test func testCSIInsertLines() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 5)
+    defer { vt_parser_destroy(&parser) }
+
+    // Fill rows 0-4
+    let text = "Row0\r\nRow1\r\nRow2\r\nRow3\r\nRow4"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // Position cursor at row 1 and insert 1 line (CSI L)
+    let insertLine = "\u{1B}[2;1H\u{1B}[L"
+    vt_parser_feed(&parser, insertLine, Int32(insertLine.utf8.count))
+
+    var buf = [CChar](repeating: 0, count: 256)
+    // Row 0 unchanged
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    #expect(String(cString: buf) == "Row0")
+
+    // Row 1 should be blank (inserted)
+    vt_parser_get_line(&parser, 1, &buf, 256)
+    #expect(String(cString: buf) == "")
+
+    // Row 2 should have old Row1
+    vt_parser_get_line(&parser, 2, &buf, 256)
+    #expect(String(cString: buf) == "Row1")
+}
+
+@Test func testCSIDeleteLines() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 5)
+    defer { vt_parser_destroy(&parser) }
+
+    // Fill rows 0-4
+    let text = "Row0\r\nRow1\r\nRow2\r\nRow3\r\nRow4"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // Position cursor at row 1 and delete 1 line (CSI M)
+    let deleteLine = "\u{1B}[2;1H\u{1B}[M"
+    vt_parser_feed(&parser, deleteLine, Int32(deleteLine.utf8.count))
+
+    var buf = [CChar](repeating: 0, count: 256)
+    // Row 0 unchanged
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    #expect(String(cString: buf) == "Row0")
+
+    // Row 1 should now have old Row2 (Row1 was deleted)
+    vt_parser_get_line(&parser, 1, &buf, 256)
+    #expect(String(cString: buf) == "Row2")
+
+    // Last row should be blank
+    vt_parser_get_line(&parser, 4, &buf, 256)
+    #expect(String(cString: buf) == "")
+}
+
+@Test func testCSIScrollUp() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 5)
+    defer { vt_parser_destroy(&parser) }
+
+    let text = "Row0\r\nRow1\r\nRow2\r\nRow3\r\nRow4"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // CSI S — scroll up 1 (top row removed, blank row at bottom)
+    let scrollUp = "\u{1B}[S"
+    vt_parser_feed(&parser, scrollUp, Int32(scrollUp.utf8.count))
+
+    var buf = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    #expect(String(cString: buf) == "Row1")
+
+    vt_parser_get_line(&parser, 4, &buf, 256)
+    #expect(String(cString: buf) == "")
+}
+
+// MARK: - OSC ST Terminator Test
+
+@Test func testOSCWithSTTerminator() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // OSC terminated by ST (ESC \) instead of BEL — backslash must not leak
+    let text = "\u{1B}]0;Title\u{1B}\\Hello"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var buf = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    #expect(String(cString: buf) == "Hello")
+}
+
+// MARK: - get_line Sparse Content Test
+
+@Test func testGetLineSparseContent() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 40, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Write "AB" at col 0, then jump to col 10 and write "CD"
+    let text = "AB\u{1B}[1;11HCD"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var buf = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    let line = String(cString: buf)
+
+    // Should contain "AB" + 8 spaces + "CD"
+    #expect(line == "AB        CD")
+}

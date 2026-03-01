@@ -2,6 +2,7 @@
 #define VT_PARSER_H
 
 #include <stdint.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 // Attribute bit flags
@@ -33,7 +34,9 @@ typedef enum {
     VT_STATE_CSI_ENTRY,
     VT_STATE_CSI_PARAM,
     VT_STATE_OSC,
+    VT_STATE_OSC_ST,
     VT_STATE_DCS,
+    VT_STATE_DCS_ST,
 } VTState;
 
 // Parser instance (one per pane)

@@ -27,6 +27,16 @@ static void scroll_up(VTParserState *p) {
     clear_row(p, bot);
 }
 
+static void scroll_down(VTParserState *p) {
+    int top = p->scroll_top;
+    int bot = p->scroll_bottom;
+    if (top >= bot) return;
+    memmove(&p->buffer[(top + 1) * p->cols],
+            &p->buffer[top * p->cols],
+            (size_t)(bot - top) * (size_t)p->cols * sizeof(VTCell));
+    clear_row(p, top);
+}
+
 static void put_char(VTParserState *p, uint32_t ch) {
     if (p->cursor_col >= p->cols) {
         p->cursor_col = 0;
@@ -211,6 +221,32 @@ static void handle_csi(VTParserState *p, char cmd) {
             clear_row(p, p->cursor_row);
         }
         break;
+    case 'L': { /* Insert Lines — insert n blank lines at cursor, scroll down */
+        int count = (n > 0) ? n : 1;
+        int saved_top = p->scroll_top;
+        p->scroll_top = p->cursor_row;
+        for (int j = 0; j < count; j++) scroll_down(p);
+        p->scroll_top = saved_top;
+        break;
+    }
+    case 'M': { /* Delete Lines — delete n lines at cursor, scroll up */
+        int count = (n > 0) ? n : 1;
+        int saved_top = p->scroll_top;
+        p->scroll_top = p->cursor_row;
+        for (int j = 0; j < count; j++) scroll_up(p);
+        p->scroll_top = saved_top;
+        break;
+    }
+    case 'S': { /* Scroll Up — scroll content up by n lines */
+        int count = (n > 0) ? n : 1;
+        for (int j = 0; j < count; j++) scroll_up(p);
+        break;
+    }
+    case 'T': { /* Scroll Down — scroll content down by n lines */
+        int count = (n > 0) ? n : 1;
+        for (int j = 0; j < count; j++) scroll_down(p);
+        break;
+    }
     case 'm': /* SGR */
         handle_sgr(p);
         break;
@@ -408,16 +444,34 @@ void vt_parser_feed(VTParserState *parser, const char *data, int len) {
             if (ch == 0x07) {
                 parser->state = VT_STATE_GROUND;
             } else if (ch == 0x1B) {
-                /* Possible ST — next char should be '\\' */
-                /* For simplicity, just go to ground */
+                parser->state = VT_STATE_OSC_ST;
+            }
+            break;
+
+        case VT_STATE_OSC_ST:
+            if (ch == '\\') {
+                /* Proper ST (ESC \) — consume the backslash */
                 parser->state = VT_STATE_GROUND;
+            } else {
+                /* Not ST — treat the ESC as starting a new escape sequence */
+                parser->state = VT_STATE_ESCAPE;
+                i--; /* re-process this byte in ESCAPE state */
             }
             break;
 
         case VT_STATE_DCS:
             /* Skip until ST (ESC \) */
             if (ch == 0x1B) {
+                parser->state = VT_STATE_DCS_ST;
+            }
+            break;
+
+        case VT_STATE_DCS_ST:
+            if (ch == '\\') {
                 parser->state = VT_STATE_GROUND;
+            } else {
+                parser->state = VT_STATE_ESCAPE;
+                i--; /* re-process this byte in ESCAPE state */
             }
             break;
         }
@@ -426,6 +480,9 @@ void vt_parser_feed(VTParserState *parser, const char *data, int len) {
 
 void vt_parser_resize(VTParserState *parser, int cols, int rows) {
     if (!parser || cols <= 0 || rows <= 0) return;
+
+    /* Overflow check: ensure cols * rows * sizeof(VTCell) fits in size_t */
+    if ((size_t)cols > SIZE_MAX / ((size_t)rows * sizeof(VTCell))) return;
 
     VTCell *new_buffer = (VTCell *)calloc((size_t)cols * (size_t)rows, sizeof(VTCell));
     if (!new_buffer) return;
@@ -462,15 +519,19 @@ int vt_parser_get_line(VTParserState *parser, int row, char *buf, int buf_size) 
         return 0;
     }
 
-    int written = 0;
-    for (int c = 0; c < parser->cols && written < buf_size - 1; c++) {
+    /* Find the last non-null column to avoid trailing spaces but preserve
+     * internal gaps (cursor-positioned content). */
+    int last_nonzero = -1;
+    for (int c = parser->cols - 1; c >= 0; c--) {
         VTCell *cell = cell_at(parser, row, c);
-        if (!cell || cell->character == 0) {
-            /* Stop at first null character (trailing spaces) */
-            break;
-        }
+        if (cell && cell->character != 0) { last_nonzero = c; break; }
+    }
 
-        uint32_t cp = cell->character;
+    int written = 0;
+    for (int c = 0; c <= last_nonzero && written < buf_size - 1; c++) {
+        VTCell *cell = cell_at(parser, row, c);
+        /* Output space for null gaps (e.g. cursor-positioned content) */
+        uint32_t cp = (cell && cell->character != 0) ? cell->character : ' ';
         if (cp < 0x80) {
             /* ASCII */
             buf[written++] = (char)cp;

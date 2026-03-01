@@ -167,8 +167,8 @@ final class ConnectionManager {
         activeChannel = channel
 
         // Send tmux -CC attach command through the shell.
-        let command = "tmux -CC attach -t \(shellEscaped(session.name))\n"
-        try channel.write(command.data(using: .utf8)!)
+        let command = "tmux -CC attach -t \(session.name.shellEscaped())\n"
+        try channel.write(Data(command.utf8))
 
         state = .attached(sessionName: session.name)
 
@@ -194,7 +194,7 @@ final class ConnectionManager {
         sshMonitorTask = nil
         // Send detach command if channel is active.
         if let channel = activeChannel {
-            try? channel.write("detach\n".data(using: .utf8)!)
+            try? channel.write(Data("detach\n".utf8))
         }
         activeChannel = nil  // Don't close — SSHService owns the channel lifecycle
         tmuxService.resetLineBuffer()
@@ -209,7 +209,7 @@ final class ConnectionManager {
     /// server, then refresh the session list.
     func createTmuxSession(name: String) async throws {
         guard state == .sessionList else { return }
-        _ = try await sshService.execCommand("tmux new-session -d -s \(shellEscaped(name))")
+        _ = try await sshService.execCommand("tmux new-session -d -s \(name.shellEscaped())")
         try await refreshSessions()
     }
 
@@ -217,7 +217,7 @@ final class ConnectionManager {
     /// the session list.
     func deleteTmuxSession(_ session: TmuxSession) async throws {
         guard state == .sessionList else { return }
-        _ = try await sshService.execCommand("tmux kill-session -t \(shellEscaped(session.name))")
+        _ = try await sshService.execCommand("tmux kill-session -t \(session.name.shellEscaped())")
         try await refreshSessions()
     }
 
@@ -357,15 +357,6 @@ final class ConnectionManager {
             // Log error but don't disconnect -- tmux errors can be non-fatal.
             self?.logger.error("TmuxControl error: \(message)")
         }
-    }
-
-    // MARK: - Shell Safety
-
-    /// Wraps a string in single quotes with proper escaping so it is safe
-    /// to interpolate into a shell command.  Any embedded single-quote
-    /// characters are escaped using the `'\''` idiom.
-    private func shellEscaped(_ s: String) -> String {
-        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
     /// Re-query the remote server for the current list of tmux sessions

@@ -417,6 +417,8 @@ actor SSHService: SSHServiceProtocol {
                 if libssh2_channel_eof(channel) != 0 {
                     break
                 }
+                // Avoid tight spin — yield briefly when no data and no EOF
+                try? await Task.sleep(for: .milliseconds(10))
             } else if bytesRead < 0 {
                 libssh2_channel_close(channel)
                 libssh2_channel_wait_closed(channel)
@@ -530,8 +532,10 @@ actor SSHService: SSHServiceProtocol {
                     libssh2_session_set_blocking(sess, 1)
                 }
                 // Signal that the connection dropped so observers can
-                // trigger reconnection.
-                await self.updateState(.disconnected)
+                // trigger reconnection (but not on intentional cancel).
+                if !Task.isCancelled {
+                    await self.updateState(.disconnected)
+                }
             }
         }
 

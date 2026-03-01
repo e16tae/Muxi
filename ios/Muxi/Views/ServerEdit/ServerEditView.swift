@@ -1,5 +1,6 @@
 import SwiftUI
 import SwiftData
+import os
 
 struct ServerEditView: View {
     @Environment(\.modelContext) private var modelContext
@@ -17,6 +18,7 @@ struct ServerEditView: View {
 
     private var isEditing: Bool { server != nil }
     private let keychainService = KeychainService()
+    private let logger = Logger(subsystem: "com.muxi.app", category: "ServerEditView")
 
     var body: some View {
         NavigationStack {
@@ -92,6 +94,9 @@ struct ServerEditView: View {
             authMethod = .password
         }
 
+        // Capture original auth method BEFORE mutation (Server is a reference type)
+        let previousAuthMethod = server?.authMethod
+
         let targetServer: Server
         if let server {
             server.name = name
@@ -111,11 +116,24 @@ struct ServerEditView: View {
             targetServer = newServer
         }
 
-        if !useKeyAuth && !password.isEmpty {
-            try? keychainService.savePassword(password, account: targetServer.id.uuidString)
+        // Clean up stale Keychain password when switching from password to key auth
+        if useKeyAuth, case .password = previousAuthMethod {
+            try? keychainService.deletePassword(account: targetServer.id.uuidString)
         }
 
-        try? modelContext.save()
+        if !useKeyAuth && !password.isEmpty {
+            do {
+                try keychainService.savePassword(password, account: targetServer.id.uuidString)
+            } catch {
+                logger.error("Failed to save password to Keychain: \(error.localizedDescription)")
+            }
+        }
+
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save server: \(error.localizedDescription)")
+        }
         dismiss()
     }
 }

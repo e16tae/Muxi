@@ -162,9 +162,7 @@ extension QuickAction {
     static func buildRenameCommand(base: String, name: String) -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-        // Shell-escape the name: wrap in single quotes, escaping embedded quotes
-        let escaped = "'" + trimmed.replacingOccurrences(of: "'", with: "'\\''") + "'"
-        return "\(base) \(escaped)"
+        return "\(base) \(trimmed.shellEscaped())"
     }
 }
 

@@ -24,6 +24,7 @@ enum SpecialKey: Equatable {
 /// This is an `@Observable` class so SwiftUI views automatically track changes
 /// to `ctrlActive` and `altActive`. Modifiers auto-deactivate after the next
 /// regular character input (sticky-toggle behaviour).
+@MainActor
 @Observable
 final class InputHandler {
 

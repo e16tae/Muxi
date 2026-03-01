@@ -1,3 +1,4 @@
+import Security
 import XCTest
 
 @testable import Muxi
@@ -5,6 +6,22 @@ import XCTest
 final class KeychainServiceTests: XCTestCase {
     let service = KeychainService()
     let testAccount = "test-\(UUID().uuidString)"
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        // Keychain requires code signing entitlements, unavailable on CI.
+        // Probe with a dummy query to detect errSecMissingEntitlement (-34018).
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: "__keychain_probe__",
+            kSecReturnData as String: true,
+        ]
+        let status = SecItemCopyMatching(query as CFDictionary, nil)
+        try XCTSkipIf(
+            status == errSecMissingEntitlement,
+            "Keychain is unavailable (missing code signing entitlements)"
+        )
+    }
 
     override func tearDown() {
         super.tearDown()

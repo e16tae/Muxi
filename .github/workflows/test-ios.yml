@@ -21,6 +21,17 @@ jobs:
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.2.app
 
+      - name: Install iOS Simulator runtime
+        run: |
+          for attempt in 1 2 3; do
+            if xcodebuild -downloadPlatform iOS; then
+              break
+            fi
+            echo "Attempt $attempt failed, retrying in 10s..."
+            sleep 10
+          done
+          xcrun simctl list runtimes iOS
+
       - name: Install XcodeGen
         run: brew install xcodegen
 
@@ -34,7 +45,7 @@ jobs:
           xcodebuild test \
             -project Muxi.xcodeproj \
             -scheme Muxi \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.2' \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
             CODE_SIGNING_ALLOWED=NO \
             -resultBundlePath TestResults.xcresult
 

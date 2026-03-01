@@ -29,6 +29,10 @@ targets:
         buildPhase: resources
     dependencies:
       - package: MuxiCore
+      - framework: ../vendor/libssh2.xcframework
+        embed: false
+      - framework: ../vendor/openssl.xcframework
+        embed: false
     settings:
       base:
         INFOPLIST_GENERATION_MODE: GeneratedFile

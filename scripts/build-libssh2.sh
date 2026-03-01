@@ -221,6 +221,18 @@ xcodebuild -create-xcframework \
     -headers "$SIM_FAT_DIR/include" \
     -output "$XCFRAMEWORK_OUT"
 
+# ── Add module map for Swift import ────────────────────────────────────────
+log "Adding module.modulemap for Swift import..."
+find "$XCFRAMEWORK_OUT" -name Headers -type d | while read -r headers_dir; do
+    cat > "$headers_dir/module.modulemap" <<'MODULEMAP'
+module CLibSSH2 [system] {
+    header "libssh2.h"
+    link "ssh2"
+    export *
+}
+MODULEMAP
+done
+
 log ""
 log "libssh2 ${LIBSSH2_VERSION} build complete!"
 log "  xcframework: $XCFRAMEWORK_OUT"

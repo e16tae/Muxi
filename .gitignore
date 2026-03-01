@@ -36,5 +36,8 @@ Package.resolved
 # ── Vendor (built by scripts/build-all.sh) ──────────────────────────
 vendor/
 
+# ── Fonts (downloaded by scripts/download-fonts.sh) ────────────────
+ios/Muxi/Resources/Fonts/*.ttf
+
 # ── Claude Code ─────────────────────────────────────────────────────
 .claude/

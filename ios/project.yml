@@ -24,7 +24,11 @@ targets:
       - path: Muxi
         excludes:
           - "Resources/Themes/**"
+          - "Resources/Fonts/**"
       - path: Muxi/Resources/Themes
+        type: folder
+        buildPhase: resources
+      - path: Muxi/Resources/Fonts
         type: folder
         buildPhase: resources
     dependencies:
@@ -42,6 +46,10 @@ targets:
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_EMIT_LOC_STRINGS: "YES"
+    info:
+      properties:
+        UIAppFonts:
+          - Fonts/SarasaMonoSC-NF-Regular.ttf
 
   MuxiTests:
     type: bundle.unit-test

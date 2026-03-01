@@ -32,7 +32,12 @@ struct TerminalView: UIViewRepresentable {
         mtkView.isPaused = true
         mtkView.enableSetNeedsDisplay = true
 
-        let font = UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        // Prefer bundled Sarasa Mono SC Nerd Font for CJK + icon coverage.
+        // NOTE: The font name below must match the PostScript name or family
+        // name registered in the TTF. Adjust after verifying with the actual
+        // font file (run: scripts/download-fonts.sh, then check in Font Book).
+        let font = UIFont(name: "Sarasa Mono SC Nerd Font", size: 14)
+            ?? UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
 
         if let renderer = TerminalRenderer(device: device, font: font, theme: theme) {
             renderer.buffer = buffer

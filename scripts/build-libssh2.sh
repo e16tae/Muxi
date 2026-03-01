@@ -18,9 +18,9 @@ XCFRAMEWORK_OUT="$VENDOR_DIR/libssh2.xcframework"
 # ── Configuration ───────────────────────────────────────────────────────────
 LIBSSH2_VERSION="1.11.1"
 LIBSSH2_URL="https://github.com/libssh2/libssh2/releases/download/libssh2-${LIBSSH2_VERSION}/libssh2-${LIBSSH2_VERSION}.tar.gz"
-# TODO: Verify this hash against https://libssh2.org/download/ or compute from
-# a trusted download. The official release does not publish a SHA-256 sidecar.
-LIBSSH2_SHA256="d2f1b3540b4e138aa4abaa6e4a6b2e0b0e1c37b4f837d0ea2c5e5f13a6e0d5b6"
+# SHA-256 verified against Homebrew formula (homebrew-core/Formula/lib/libssh2.rb)
+# which downloads from https://libssh2.org/download/libssh2-1.11.1.tar.gz
+LIBSSH2_SHA256="d9ec76cbe34db98eec3539fe2c899d26b0c837cb3eb466a56b0f109cabf658f7"
 IOS_MIN_VERSION="17.0"
 
 # Architectures

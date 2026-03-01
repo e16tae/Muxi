@@ -210,7 +210,11 @@ actor SSHService: SSHServiceProtocol {
     /// via the `onData` callback.
     private var readTask: Task<Void, Never>?
 
-    init() {
+    /// Timeout applied to socket send/receive and libssh2 session operations.
+    private let connectionTimeout: TimeInterval
+
+    init(connectionTimeout: TimeInterval = 30) {
+        self.connectionTimeout = connectionTimeout
         let rc = libssh2_init(0)
         libssh2Initialized = (rc == 0)
     }
@@ -247,6 +251,12 @@ actor SSHService: SSHServiceProtocol {
                 throw SSHError.connectionFailed("Failed to create socket")
             }
             socketFd = fd
+
+            // Apply socket-level timeouts so connect/read/write don't block
+            // indefinitely on unreachable hosts or stalled networks.
+            var timeout = timeval(tv_sec: Int(connectionTimeout), tv_usec: 0)
+            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
+            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
 
             // Resolve the host.
             var hints = addrinfo()
@@ -288,6 +298,11 @@ actor SSHService: SSHServiceProtocol {
                 )
             }
             session = sess
+
+            // Apply a session-level timeout (in milliseconds) so that
+            // libssh2 operations like handshake and auth also respect the
+            // configured limit.
+            libssh2_session_set_timeout(sess, Int(connectionTimeout * 1000))
 
             // Blocking mode for the handshake and authentication.
             libssh2_session_set_blocking(sess, 1)

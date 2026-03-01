@@ -32,3 +32,6 @@ Package.resolved
 *.a
 *.dylib
 *.dSYM/
+
+# ── Claude Code ─────────────────────────────────────────────────────
+.claude/

@@ -8,7 +8,7 @@ import SwiftUI
 struct TerminalSessionView: View {
     let connectionManager: ConnectionManager
     let sessionName: String
-    let theme: Theme = .catppuccinMocha
+    let themeManager: ThemeManager
 
     @State private var activePaneId: String?
     @State private var inputHandler = InputHandler()
@@ -41,14 +41,14 @@ struct TerminalSessionView: View {
                     // Terminal panes
                     PaneContainerView(
                         panes: panes,
-                        theme: theme,
+                        theme: themeManager.currentTheme,
                         activePaneId: $activePaneId
                     )
                 }
 
                 // Extended keyboard toolbar
                 ExtendedKeyboardView(
-                    theme: theme,
+                    theme: themeManager.currentTheme,
                     inputHandler: inputHandler,
                     onInput: { data in
                         sendToActivePane(data)

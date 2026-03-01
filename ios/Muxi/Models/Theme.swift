@@ -92,6 +92,36 @@ struct Theme: Codable, Identifiable, Equatable {
         try? JSONDecoder().decode(Theme.self, from: data)
     }
 
+    // MARK: - Bundle Loading
+
+    /// Load all bundled theme JSON files from the Themes directory.
+    ///
+    /// Scans the app bundle's `Themes` folder for `.json` files, decodes each
+    /// one into a ``Theme``, and returns them sorted by name.  Falls back to
+    /// ``catppuccinMocha`` if the folder is missing or contains no valid themes.
+    static func loadBundledThemes() -> [Theme] {
+        guard let themesURL = Bundle.main.url(
+            forResource: "Themes",
+            withExtension: nil
+        ) else { return [.catppuccinMocha] }
+
+        guard let contents = try? FileManager.default.contentsOfDirectory(
+            at: themesURL,
+            includingPropertiesForKeys: nil,
+            options: .skipsHiddenFiles
+        ) else { return [.catppuccinMocha] }
+
+        let themes = contents
+            .filter { $0.pathExtension == "json" }
+            .compactMap { url -> Theme? in
+                guard let data = try? Data(contentsOf: url) else { return nil }
+                return try? JSONDecoder().decode(Theme.self, from: data)
+            }
+            .sorted { $0.name < $1.name }
+
+        return themes.isEmpty ? [.catppuccinMocha] : themes
+    }
+
     // MARK: - Built-in Themes
 
     /// The default theme (Catppuccin Mocha).

@@ -14,7 +14,7 @@ struct TerminalView: UIViewRepresentable {
     // MARK: - UIViewRepresentable
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(buffer: buffer, channel: channel)
+        Coordinator(buffer: buffer, channel: channel, theme: theme)
     }
 
     func makeUIView(context: Context) -> MTKView {
@@ -65,6 +65,21 @@ struct TerminalView: UIViewRepresentable {
         context.coordinator.channel = channel
         let bufferChanged = context.coordinator.renderer?.buffer !== buffer
         context.coordinator.renderer?.buffer = buffer
+
+        // Update theme if changed (e.g. user selected a new theme in settings).
+        if context.coordinator.currentTheme != theme {
+            context.coordinator.currentTheme = theme
+            context.coordinator.renderer?.updateTheme(theme)
+            let bg = theme.background
+            mtkView.clearColor = MTLClearColor(
+                red: Double(bg.r) / 255,
+                green: Double(bg.g) / 255,
+                blue: Double(bg.b) / 255,
+                alpha: 1
+            )
+            context.coordinator.requestRedraw()
+        }
+
         if bufferChanged {
             context.coordinator.requestRedraw()
         }
@@ -79,10 +94,12 @@ struct TerminalView: UIViewRepresentable {
         var channel: SSHChannel?
         var renderer: TerminalRenderer?
         weak var mtkView: MTKView?
+        var currentTheme: Theme
 
-        init(buffer: TerminalBuffer, channel: SSHChannel?) {
+        init(buffer: TerminalBuffer, channel: SSHChannel?, theme: Theme) {
             self.buffer = buffer
             self.channel = channel
+            self.currentTheme = theme
         }
 
         /// Send text input to the SSH channel.

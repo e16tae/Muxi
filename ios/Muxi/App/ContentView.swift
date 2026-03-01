@@ -11,6 +11,7 @@ import SwiftUI
 /// ```
 struct ContentView: View {
     @State private var connectionManager = ConnectionManager()
+    @State private var themeManager = ThemeManager()
     @State private var errorMessage: String?
     @State private var showErrorBanner = false
     @State private var selectedServer: Server?
@@ -37,7 +38,8 @@ struct ContentView: View {
             case .attached(let sessionName):
                 TerminalSessionView(
                     connectionManager: connectionManager,
-                    sessionName: sessionName
+                    sessionName: sessionName,
+                    themeManager: themeManager
                 )
                 .onAppear {
                     previousAttachedSession = sessionName
@@ -49,7 +51,8 @@ struct ContentView: View {
                 if let previousSession = previousAttachedSession {
                     TerminalSessionView(
                         connectionManager: connectionManager,
-                        sessionName: previousSession
+                        sessionName: previousSession,
+                        themeManager: themeManager
                     )
                 }
                 ReconnectingOverlay(
@@ -117,6 +120,15 @@ struct ContentView: View {
             ServerListView(onServerTap: { server in
                 handleServerTap(server)
             })
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        ThemeSettingsView(themeManager: themeManager)
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                }
+            }
         }
     }
 

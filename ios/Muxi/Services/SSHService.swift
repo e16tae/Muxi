@@ -109,10 +109,12 @@ protocol SSHServiceProtocol: AnyObject {
 /// from the main thread.
 final class LibSSH2Channel: SSHChannel {
     private let channelPtr: OpaquePointer
+    private let socketFd: Int32
     private var isClosed = false
 
-    init(channel: OpaquePointer) {
+    init(channel: OpaquePointer, socketFd: Int32) {
         self.channelPtr = channel
+        self.socketFd = socketFd
     }
 
     func write(_ data: Data) throws {
@@ -132,8 +134,9 @@ final class LibSSH2Channel: SSHChannel {
                     count - totalWritten
                 )
                 if rc == kLibSSH2ErrorEAGAIN {
-                    // Non-blocking mode: briefly spin and retry
-                    usleep(1000)  // 1ms
+                    // Wait for socket to become writable instead of busy-spinning
+                    var pollFd = pollfd(fd: socketFd, events: Int16(POLLOUT), revents: 0)
+                    poll(&pollFd, 1, 100)  // Wait up to 100ms for writable
                     continue
                 }
                 if rc < 0 {
@@ -481,7 +484,8 @@ actor SSHService: SSHServiceProtocol {
         // back to the Swift concurrency runtime between reads.
         libssh2_session_set_blocking(sess, 0)
 
-        let sshChannel = LibSSH2Channel(channel: channel)
+        let fd = self.socketFd
+        let sshChannel = LibSSH2Channel(channel: channel, socketFd: fd)
 
         // Background task: continuously read from the channel and deliver
         // data to the caller's callback.
@@ -500,8 +504,10 @@ actor SSHService: SSHServiceProtocol {
                     let data = Data(bytes: buf, count: Int(bytesRead))
                     onData(data)
                 } else if bytesRead == kLibSSH2ErrorEAGAIN {
-                    // No data available yet -- yield briefly and retry.
-                    try? await Task.sleep(for: .milliseconds(10))
+                    // Wait for socket to become readable instead of fixed sleep.
+                    var pollFd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                    poll(&pollFd, 1, 50)  // Returns immediately when data arrives, up to 50ms
+                    if Task.isCancelled { break }
                 } else if bytesRead == 0
                             && libssh2_channel_eof(channel) != 0 {
                     // Remote side closed the channel.
@@ -510,8 +516,10 @@ actor SSHService: SSHServiceProtocol {
                     // A real error occurred -- stop reading.
                     break
                 } else {
-                    // bytesRead == 0 but no EOF -- keep trying.
-                    try? await Task.sleep(for: .milliseconds(10))
+                    // bytesRead == 0 but no EOF -- wait for readable data.
+                    var pollFd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                    poll(&pollFd, 1, 50)  // Returns immediately when data arrives, up to 50ms
+                    if Task.isCancelled { break }
                 }
             }
 

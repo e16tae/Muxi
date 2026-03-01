@@ -39,14 +39,13 @@ targets:
         embed: false
     settings:
       base:
-        INFOPLIST_GENERATION_MODE: GeneratedFile
-        GENERATE_INFOPLIST_FILE: "YES"
         PRODUCT_BUNDLE_IDENTIFIER: com.muxi.app
         PRODUCT_NAME: Muxi
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_EMIT_LOC_STRINGS: "YES"
     info:
+      path: Muxi/Info.plist
       properties:
         UIAppFonts:
           - Fonts/SarasaMonoSC-NF-Regular.ttf
@@ -60,8 +59,9 @@ targets:
       - target: Muxi
     settings:
       base:
-        INFOPLIST_GENERATION_MODE: GeneratedFile
-        GENERATE_INFOPLIST_FILE: "YES"
         PRODUCT_BUNDLE_IDENTIFIER: com.muxi.tests
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Muxi.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/Muxi"
         BUNDLE_LOADER: "$(TEST_HOST)"
+    info:
+      path: MuxiTests/Info.plist
+      properties: {}

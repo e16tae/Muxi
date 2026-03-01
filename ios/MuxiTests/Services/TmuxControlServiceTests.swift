@@ -254,17 +254,13 @@ final class TmuxControlServiceTests: XCTestCase {
 
     func testFeedWithCarriageReturn() {
         let service = TmuxControlService()
-        var receivedData: String?
+        var exitCalled = false
+        service.onExit = { exitCalled = true }
 
-        service.onPaneOutput = { _, data in
-            receivedData = data
-        }
-
-        // \r\n — only splits on \n, \r stays in the line
-        let data = Data("%output %0 hello\\n\r\n".utf8)
+        // PTY-style CRLF: \r should be stripped, leaving "%exit" which parses correctly
+        let data = "%exit\r\n".data(using: .utf8)!
         service.feed(data)
 
-        // The line passed to handleLine includes the \r
-        XCTAssertNotNil(receivedData)
+        XCTAssertTrue(exitCalled, "\\r should be stripped so %exit parses correctly")
     }
 }

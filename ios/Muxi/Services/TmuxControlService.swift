@@ -57,8 +57,13 @@ final class TmuxControlService {
 
         // Split on \n (0x0A), processing each complete line
         while let newlineIndex = lineBuffer.firstIndex(of: 0x0A) {
-            let lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
+            var lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
             lineBuffer = Data(lineBuffer[(newlineIndex + 1)...])
+
+            // Strip trailing \r (PTY adds CRLF translation)
+            if lineData.last == 0x0D {
+                lineData = lineData.dropLast()
+            }
 
             if let line = String(data: lineData, encoding: .utf8) {
                 handleLine(line)

@@ -131,8 +131,7 @@ final class ConnectionManager {
     func disconnect() {
         sshMonitorTask?.cancel()
         sshMonitorTask = nil
-        activeChannel?.close()
-        activeChannel = nil
+        activeChannel = nil  // Don't close — SSHService owns the channel lifecycle
         tmuxService.resetLineBuffer()
         paneBuffers = [:]
         currentPanes = []
@@ -195,8 +194,7 @@ final class ConnectionManager {
         if let channel = activeChannel {
             try? channel.write("detach\n".data(using: .utf8)!)
         }
-        activeChannel?.close()
-        activeChannel = nil
+        activeChannel = nil  // Don't close — SSHService owns the channel lifecycle
         tmuxService.resetLineBuffer()
         paneBuffers = [:]
         currentPanes = []
@@ -208,6 +206,7 @@ final class ConnectionManager {
     /// Create a new detached tmux session with the given name on the remote
     /// server, then refresh the session list.
     func createTmuxSession(name: String) async throws {
+        guard state == .sessionList else { return }
         _ = try await sshService.execCommand("tmux new-session -d -s \(shellEscaped(name))")
         try await refreshSessions()
     }
@@ -215,6 +214,7 @@ final class ConnectionManager {
     /// Kill the specified tmux session on the remote server, then refresh
     /// the session list.
     func deleteTmuxSession(_ session: TmuxSession) async throws {
+        guard state == .sessionList else { return }
         _ = try await sshService.execCommand("tmux kill-session -t \(shellEscaped(session.name))")
         try await refreshSessions()
     }
@@ -231,6 +231,7 @@ final class ConnectionManager {
     /// After exhausting ``maxReconnectAttempts`` the state moves to
     /// `.disconnected`.
     func reconnect() async {
+        guard state != .reconnecting else { return }
         guard let server = currentServer,
               let auth = cachedAuth else { return }
 

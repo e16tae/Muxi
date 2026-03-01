@@ -117,17 +117,22 @@ final class LibSSH2Channel: SSHChannel {
             throw SSHError.channelError("Channel is closed")
         }
         try data.withUnsafeBytes { rawBuffer in
-            guard let baseAddress = rawBuffer.baseAddress else { return }
-            let ptr = baseAddress.assumingMemoryBound(to: CChar.self)
-            var totalWritten = 0
+            guard let ptr = rawBuffer.baseAddress?.assumingMemoryBound(
+                to: CChar.self
+            ) else { return }
             let count = rawBuffer.count
+            var totalWritten = 0
             while totalWritten < count {
                 let rc = libssh2_channel_write_ex(
-                    channelPtr,
-                    0,
+                    channelPtr, 0,
                     ptr.advanced(by: totalWritten),
                     count - totalWritten
                 )
+                if rc == kLibSSH2ErrorEAGAIN {
+                    // Non-blocking mode: briefly spin and retry
+                    usleep(1000)  // 1ms
+                    continue
+                }
                 if rc < 0 {
                     throw SSHError.channelError(
                         "Channel write failed (rc=\(rc))"

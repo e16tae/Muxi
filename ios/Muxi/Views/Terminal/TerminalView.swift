@@ -67,7 +67,7 @@ struct TerminalView: UIViewRepresentable {
         context.coordinator.renderer?.buffer = buffer
 
         // Update theme if changed (e.g. user selected a new theme in settings).
-        if context.coordinator.currentTheme != theme {
+        if context.coordinator.currentTheme.id != theme.id {
             context.coordinator.currentTheme = theme
             context.coordinator.renderer?.updateTheme(theme)
             let bg = theme.background

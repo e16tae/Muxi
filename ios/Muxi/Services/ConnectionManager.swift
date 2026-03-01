@@ -42,6 +42,15 @@ final class ConnectionManager {
     /// The list of tmux sessions discovered on the remote server.
     private(set) var sessions: [TmuxSession] = []
 
+    /// Per-pane terminal buffers, keyed by tmux pane ID (e.g., "%0").
+    private(set) var paneBuffers: [String: TerminalBuffer] = [:]
+
+    /// Current pane layout from tmux.
+    private(set) var currentPanes: [TmuxControlService.ParsedPane] = []
+
+    /// The active SSH shell channel (for tmux control mode).
+    private(set) var activeChannel: SSHChannel?
+
     /// Cached credentials from the last successful ``connect(server:password:)``
     /// call, reused by ``reconnect()`` so we do not need to hit the Keychain
     /// again when re-establishing a dropped connection.
@@ -117,6 +126,11 @@ final class ConnectionManager {
 
     /// Tear down the SSH connection and reset all state.
     func disconnect() {
+        activeChannel?.close()
+        activeChannel = nil
+        tmuxService.resetLineBuffer()
+        paneBuffers = [:]
+        currentPanes = []
         sshService.disconnect()
         state = .disconnected
         currentServer = nil
@@ -128,18 +142,42 @@ final class ConnectionManager {
 
     /// Attach to a tmux session by name.
     ///
-    /// In the full implementation this will start a shell channel running
-    /// `tmux -CC attach -t <name>` and pipe output through
-    /// ``TmuxControlService/handleLine(_:)``.
+    /// Opens an interactive SSH shell channel running
+    /// `tmux -CC attach -t <name>` and pipes output through
+    /// ``TmuxControlService/feed(_:)``.
     func attachSession(_ session: TmuxSession) async throws {
         guard state == .sessionList else { return }
+
+        // Wire tmux callbacks before starting the shell.
+        wireCallbacks()
+
+        // Start an interactive shell, feeding data to the tmux parser.
+        let channel = try await sshService.startShell(onData: { [weak self] data in
+            Task { @MainActor in
+                self?.tmuxService.feed(data)
+            }
+        })
+
+        activeChannel = channel
+
+        // Send tmux -CC attach command through the shell.
+        let command = "tmux -CC attach -t \(shellEscaped(session.name))\n"
+        try channel.write(command.data(using: .utf8)!)
+
         state = .attached(sessionName: session.name)
-        // TODO: start shell with `tmux -CC attach -t <name>`
-        // and pipe output through tmuxService.handleLine()
     }
 
     /// Detach from the current tmux session, returning to the session list.
     func detach() {
+        // Send detach command if channel is active.
+        if let channel = activeChannel {
+            try? channel.write("detach\n".data(using: .utf8)!)
+        }
+        activeChannel?.close()
+        activeChannel = nil
+        tmuxService.resetLineBuffer()
+        paneBuffers = [:]
+        currentPanes = []
         state = .sessionList
     }
 
@@ -202,7 +240,15 @@ final class ConnectionManager {
                 // exists on the server.
                 if let sessionName = previousSessionName,
                    let session = sessions.first(where: { $0.name == sessionName }) {
-                    state = .attached(sessionName: session.name)
+                    // Temporarily move to sessionList so attachSession's
+                    // guard passes, then attempt to re-attach.
+                    state = .sessionList
+                    do {
+                        try await attachSession(session)
+                    } catch {
+                        // Shell/attach failed but SSH is connected; stay on session list.
+                        state = .sessionList
+                    }
                 } else {
                     state = .sessionList
                 }
@@ -238,6 +284,53 @@ final class ConnectionManager {
         case .key(let keyId):
             let (_, keyData) = try keychainService.retrieveSSHKey(id: keyId)
             return .key(privateKey: keyData, passphrase: nil)
+        }
+    }
+
+    // MARK: - Callback Wiring
+
+    /// Connect ``TmuxControlService`` callbacks to pane buffer management.
+    ///
+    /// Called once at the start of ``attachSession(_:)`` so that tmux events
+    /// flowing through the shell channel are dispatched to the correct
+    /// ``TerminalBuffer`` instances.
+    private func wireCallbacks() {
+        tmuxService.onPaneOutput = { [weak self] paneId, data in
+            self?.paneBuffers[paneId]?.feed(data)
+        }
+
+        tmuxService.onLayoutChange = { [weak self] windowId, panes in
+            guard let self else { return }
+            self.currentPanes = panes
+            // Create TerminalBuffer for any new panes.
+            for pane in panes {
+                let paneId = "%\(pane.paneId)"
+                if self.paneBuffers[paneId] == nil {
+                    self.paneBuffers[paneId] = TerminalBuffer(
+                        cols: pane.width, rows: pane.height
+                    )
+                } else {
+                    // Resize existing buffer if dimensions changed.
+                    self.paneBuffers[paneId]?.resize(
+                        cols: pane.width, rows: pane.height
+                    )
+                }
+            }
+            // Remove buffers for panes that no longer exist.
+            let activePaneIds = Set(panes.map { "%\($0.paneId)" })
+            for key in self.paneBuffers.keys where !activePaneIds.contains(key) {
+                self.paneBuffers.removeValue(forKey: key)
+            }
+        }
+
+        tmuxService.onExit = { [weak self] in
+            guard let self else { return }
+            Task { await self.reconnect() }
+        }
+
+        tmuxService.onError = { message in
+            // Log error but don't disconnect -- tmux errors can be non-fatal.
+            print("[TmuxControl] Error: \(message)")
         }
     }
 

@@ -136,6 +136,48 @@ final class ConnectionManagerTests: XCTestCase {
         XCTAssertEqual(manager.state, .sessionList)
     }
 
+    // MARK: - Attach with Shell Channel
+
+    func testAttachSessionCallsStartShell() async throws {
+        let ssh = MockSSHService()
+        ssh.mockExecResult = "$0:work:1:0"
+        let manager = ConnectionManager(sshService: ssh)
+        let sessions = try await manager.connect(server: makeServer(), password: "p")
+
+        try await manager.attachSession(sessions[0])
+
+        XCTAssertEqual(manager.state, .attached(sessionName: "work"))
+        XCTAssertNotNil(manager.activeChannel)
+    }
+
+    func testDisconnectCleansUpChannel() async throws {
+        let ssh = MockSSHService()
+        ssh.mockExecResult = "$0:work:1:0"
+        let manager = ConnectionManager(sshService: ssh)
+        let sessions = try await manager.connect(server: makeServer(), password: "p")
+        try await manager.attachSession(sessions[0])
+
+        manager.disconnect()
+
+        XCTAssertNil(manager.activeChannel)
+        XCTAssertTrue(manager.paneBuffers.isEmpty)
+        XCTAssertTrue(manager.currentPanes.isEmpty)
+    }
+
+    func testDetachResetsToSessionList() async throws {
+        let ssh = MockSSHService()
+        ssh.mockExecResult = "$0:work:1:0"
+        let manager = ConnectionManager(sshService: ssh)
+        let sessions = try await manager.connect(server: makeServer(), password: "p")
+        try await manager.attachSession(sessions[0])
+
+        manager.detach()
+
+        XCTAssertEqual(manager.state, .sessionList)
+        XCTAssertNil(manager.activeChannel)
+        XCTAssertTrue(manager.paneBuffers.isEmpty)
+    }
+
     // MARK: - State Equality
 
     func testConnectionStateEquality() {

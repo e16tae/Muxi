@@ -38,7 +38,7 @@ final class ReconnectMockSSHService: SSHServiceProtocol {
 
     func startShell(onData: @escaping (Data) -> Void) async throws -> SSHChannel {
         guard state == .connected else { throw SSHError.notConnected }
-        throw SSHError.channelError("startShell not implemented in reconnect mock")
+        return MockSSHChannel()
     }
 }
 

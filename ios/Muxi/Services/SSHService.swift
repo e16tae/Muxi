@@ -484,6 +484,9 @@ actor SSHService: SSHServiceProtocol {
                 if let sess {
                     libssh2_session_set_blocking(sess, 1)
                 }
+                // Signal that the connection dropped so observers can
+                // trigger reconnection.
+                await self.updateState(.disconnected)
             }
         }
 

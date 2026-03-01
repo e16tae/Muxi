@@ -12,17 +12,39 @@ struct TerminalSessionView: View {
 
     @State private var activePaneId: String?
     @State private var inputHandler = InputHandler()
-    @State private var panes: [PaneContainerView.PaneInfo] = []
+
+    /// Build pane info from ConnectionManager's live pane data.
+    private var panes: [PaneContainerView.PaneInfo] {
+        connectionManager.currentPanes.map { parsedPane in
+            let paneId = "%\(parsedPane.paneId)"
+            let buffer = connectionManager.paneBuffers[paneId]
+                ?? TerminalBuffer(cols: parsedPane.width, rows: parsedPane.height)
+            return PaneContainerView.PaneInfo(
+                id: paneId,
+                buffer: buffer,
+                channel: connectionManager.activeChannel,
+                x: parsedPane.x,
+                y: parsedPane.y,
+                width: parsedPane.width,
+                height: parsedPane.height
+            )
+        }
+    }
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Terminal panes
-                PaneContainerView(
-                    panes: panes,
-                    theme: theme,
-                    activePaneId: $activePaneId
-                )
+                if panes.isEmpty {
+                    // Show placeholder while waiting for tmux layout data
+                    placeholderView
+                } else {
+                    // Terminal panes
+                    PaneContainerView(
+                        panes: panes,
+                        theme: theme,
+                        activePaneId: $activePaneId
+                    )
+                }
 
                 // Extended keyboard toolbar
                 ExtendedKeyboardView(
@@ -53,46 +75,52 @@ struct TerminalSessionView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
         }
-        .onAppear {
-            setupPlaceholderPane()
+        .onChange(of: panes) { _, newPanes in
+            // Auto-select first pane if none is active
+            if activePaneId == nil, let first = newPanes.first {
+                activePaneId = first.id
+            }
         }
     }
 
-    // MARK: - Setup
+    // MARK: - Placeholder
 
-    /// Create a single placeholder pane for the MVP since the real pane data
-    /// will come from tmux control mode output in a future version.
-    private func setupPlaceholderPane() {
-        guard panes.isEmpty else { return }
-        let buffer = TerminalBuffer(cols: 80, rows: 24)
-        buffer.feed("$ Welcome to session: \(sessionName)\r\n")
-        let pane = PaneContainerView.PaneInfo(
-            id: "%0",
-            buffer: buffer,
-            channel: nil,
-            x: 0,
-            y: 0,
-            width: 80,
-            height: 24
-        )
-        panes = [pane]
-        activePaneId = pane.id
+    private var placeholderView: some View {
+        VStack {
+            Spacer()
+            ProgressView()
+            Text("Attaching to \(sessionName)...")
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Input Handling
 
-    /// Send raw data to the active pane's SSH channel.
+    /// Send raw data to the active pane via tmux control mode.
+    ///
+    /// In control mode, input to a pane is sent as a tmux `send-keys`
+    /// command through the control channel, not directly to the pane.
     private func sendToActivePane(_ data: Data) {
         guard let paneId = activePaneId,
-              let pane = panes.first(where: { $0.id == paneId }),
-              let channel = pane.channel else { return }
-        try? channel.write(data)
+              let channel = connectionManager.activeChannel else { return }
+
+        // Encode each byte as a hex key for send-keys
+        let hexKeys = data.map { String(format: "0x%02x", $0) }.joined(separator: " ")
+        let command = "send-keys -t \(paneId) \(hexKeys)\n"
+        if let cmdData = command.data(using: .utf8) {
+            try? channel.write(cmdData)
+        }
     }
 
-    /// Send a tmux command via the SSH exec channel.
+    /// Send a tmux command through the control mode channel.
     private func sendTmuxCommand(_ command: String) {
-        // TODO: Send tmux command via control mode channel.
-        // For now this is a stub; the real implementation will use
-        // sshService.execCommand("tmux \(command)") once wired.
+        guard let channel = connectionManager.activeChannel else { return }
+        let fullCommand = command + "\n"
+        if let data = fullCommand.data(using: .utf8) {
+            try? channel.write(data)
+        }
     }
 }

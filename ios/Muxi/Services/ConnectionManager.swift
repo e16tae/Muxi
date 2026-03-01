@@ -51,6 +51,9 @@ final class ConnectionManager {
     /// The active SSH shell channel (for tmux control mode).
     private(set) var activeChannel: SSHChannel?
 
+    /// Monitors SSH connection health and triggers reconnect on drop.
+    private var sshMonitorTask: Task<Void, Never>?
+
     /// Cached credentials from the last successful ``connect(server:password:)``
     /// call, reused by ``reconnect()`` so we do not need to hit the Keychain
     /// again when re-establishing a dropped connection.
@@ -126,6 +129,8 @@ final class ConnectionManager {
 
     /// Tear down the SSH connection and reset all state.
     func disconnect() {
+        sshMonitorTask?.cancel()
+        sshMonitorTask = nil
         activeChannel?.close()
         activeChannel = nil
         tmuxService.resetLineBuffer()
@@ -165,10 +170,27 @@ final class ConnectionManager {
         try channel.write(command.data(using: .utf8)!)
 
         state = .attached(sessionName: session.name)
+
+        // Monitor SSH connection — trigger reconnect if the read loop
+        // ends without a tmux %exit (e.g. network drop).
+        sshMonitorTask?.cancel()
+        sshMonitorTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self else { return }
+                if self.sshService.state == .disconnected,
+                   case .attached = self.state {
+                    await self.reconnect()
+                    return
+                }
+            }
+        }
     }
 
     /// Detach from the current tmux session, returning to the session list.
     func detach() {
+        sshMonitorTask?.cancel()
+        sshMonitorTask = nil
         // Send detach command if channel is active.
         if let channel = activeChannel {
             try? channel.write("detach\n".data(using: .utf8)!)

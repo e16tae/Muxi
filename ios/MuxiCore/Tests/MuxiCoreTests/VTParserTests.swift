@@ -1,0 +1,500 @@
+import Testing
+import CVTParser
+
+// MARK: - Basic Text Tests
+
+@Test func testPlainText() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    let text = "Hello, World!"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var buf = [CChar](repeating: 0, count: 256)
+    let written = vt_parser_get_line(&parser, 0, &buf, 256)
+    let line = String(cString: buf)
+
+    #expect(written == 13)
+    #expect(line == "Hello, World!")
+}
+
+@Test func testNewline() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    let text = "Line1\r\nLine2"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var buf0 = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 0, &buf0, 256)
+    let line0 = String(cString: buf0)
+
+    var buf1 = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 1, &buf1, 256)
+    let line1 = String(cString: buf1)
+
+    #expect(line0 == "Line1")
+    #expect(line1 == "Line2")
+}
+
+// MARK: - Cursor Movement Tests
+
+@Test func testCursorMovement() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // ESC[2;5H positions cursor at row 2, col 5 (1-based)
+    // Then write 'X'
+    let text = "\u{1B}[2;5HX"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // After writing 'X', cursor should be at row 1 (0-based), col 5 (0-based, after advancing)
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 1, 4, &cell)
+    #expect(cell.character == UInt32(Character("X").asciiValue!))
+}
+
+@Test func testCursorUp() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Move to row 5, then cursor up 3
+    let text = "\u{1B}[6;1H\u{1B}[3AA"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // Should be at row 2 (6-1=5 -> 5-3=2), col 0
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 2, 0, &cell)
+    #expect(cell.character == UInt32(Character("A").asciiValue!))
+}
+
+@Test func testCursorDown() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Cursor down 3, then write B
+    let text = "\u{1B}[3BB"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 3, 0, &cell)
+    #expect(cell.character == UInt32(Character("B").asciiValue!))
+}
+
+@Test func testCursorForwardBack() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Move forward 10, then back 5, then write C
+    let text = "\u{1B}[10C\u{1B}[5DC"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 5, &cell)
+    #expect(cell.character == UInt32(Character("C").asciiValue!))
+}
+
+// MARK: - SGR Color Tests
+
+@Test func testColorSGR() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // ESC[31m sets foreground to red (ANSI color 1), then write 'R'
+    let text = "\u{1B}[31mR"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.character == UInt32(Character("R").asciiValue!))
+    #expect(cell.fg_color == 1)
+    #expect(cell.fg_is_rgb == 0)
+}
+
+@Test func testBackgroundColor() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // ESC[42m sets background to green (ANSI color 2)
+    let text = "\u{1B}[42mG"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.bg_color == 2)
+    #expect(cell.bg_is_rgb == 0)
+}
+
+@Test func testTrueColor() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // ESC[38;2;255;128;0m sets true color foreground (orange)
+    let text = "\u{1B}[38;2;255;128;0mX"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.character == UInt32(Character("X").asciiValue!))
+    #expect(cell.fg_is_rgb == 1)
+    #expect(cell.fg_r == 255)
+    #expect(cell.fg_g == 128)
+    #expect(cell.fg_b == 0)
+}
+
+@Test func testTrueColorBackground() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // ESC[48;2;10;20;30m sets true color background
+    let text = "\u{1B}[48;2;10;20;30mY"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.bg_is_rgb == 1)
+    #expect(cell.bg_r == 10)
+    #expect(cell.bg_g == 20)
+    #expect(cell.bg_b == 30)
+}
+
+@Test func test256Color() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // ESC[38;5;196m sets 256-color foreground
+    let text = "\u{1B}[38;5;196mZ"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.fg_color == 196)
+    #expect(cell.fg_is_rgb == 0)
+}
+
+// MARK: - Attribute Tests
+
+@Test func testBoldAttribute() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    let text = "\u{1B}[1mB"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.attrs & 1 != 0) // bold bit set
+}
+
+@Test func testItalicAttribute() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    let text = "\u{1B}[3mI"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.attrs & 4 != 0) // italic bit set
+}
+
+@Test func testUnderlineAttribute() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    let text = "\u{1B}[4mU"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.attrs & 2 != 0) // underline bit set
+}
+
+@Test func testSGRReset() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Set bold + red, then reset, then write
+    let text = "\u{1B}[1;31mR\u{1B}[0mN"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // First cell should be bold+red
+    var cell0 = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell0)
+    #expect(cell0.attrs & 1 != 0) // bold
+    #expect(cell0.fg_color == 1)  // red
+
+    // Second cell should be reset
+    var cell1 = VTCell()
+    vt_parser_get_cell(&parser, 0, 1, &cell1)
+    #expect(cell1.attrs == 0)
+    #expect(cell1.fg_color == 0)
+}
+
+// MARK: - Erase Tests
+
+@Test func testEraseDisplay() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Write AAAA, then erase entire display
+    let text = "AAAA\u{1B}[2J"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.character == 0)
+
+    vt_parser_get_cell(&parser, 0, 1, &cell)
+    #expect(cell.character == 0)
+}
+
+@Test func testEraseInLine() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Write ABCDEF, go back to col 3, erase to end of line
+    let text = "ABCDEF\u{1B}[1;4H\u{1B}[0K"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // Columns 0-2 should still have A, B, C
+    var cellA = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cellA)
+    #expect(cellA.character == UInt32(Character("A").asciiValue!))
+
+    var cellC = VTCell()
+    vt_parser_get_cell(&parser, 0, 2, &cellC)
+    #expect(cellC.character == UInt32(Character("C").asciiValue!))
+
+    // Column 3 should be erased (cursor was at col 3)
+    var cellD = VTCell()
+    vt_parser_get_cell(&parser, 0, 3, &cellD)
+    #expect(cellD.character == 0)
+}
+
+// MARK: - Resize Tests
+
+@Test func testResize() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Write some text
+    let text = "Hello"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // Resize
+    vt_parser_resize(&parser, 120, 40)
+
+    #expect(parser.cols == 120)
+    #expect(parser.rows == 40)
+
+    // Old content should be preserved
+    var buf = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    let line = String(cString: buf)
+    #expect(line == "Hello")
+}
+
+@Test func testResizeShrink() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Put cursor at col 79
+    let text = "\u{1B}[1;80HX"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // Shrink to 40 cols — cursor should be clamped
+    vt_parser_resize(&parser, 40, 12)
+    #expect(parser.cols == 40)
+    #expect(parser.rows == 12)
+    #expect(parser.cursor_col < 40)
+    #expect(parser.cursor_row < 12)
+}
+
+// MARK: - Scroll Region Tests
+
+@Test func testScrollRegion() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Set scroll region to rows 1-5 (1-based)
+    let setupText = "\u{1B}[1;5r"
+    vt_parser_feed(&parser, setupText, Int32(setupText.utf8.count))
+
+    #expect(parser.scroll_top == 0)
+    #expect(parser.scroll_bottom == 4)
+}
+
+// MARK: - UTF-8 Tests
+
+@Test func testUTF8TwoByte() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // e with acute accent: U+00E9 = 0xC3 0xA9
+    let text = "\u{00E9}"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.character == 0x00E9)
+}
+
+@Test func testUTF8ThreeByte() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Euro sign: U+20AC
+    let text = "\u{20AC}"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.character == 0x20AC)
+}
+
+@Test func testUTF8FourByte() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Emoji: U+1F600
+    let text = "\u{1F600}"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.character == 0x1F600)
+}
+
+// MARK: - Tab and Backspace Tests
+
+@Test func testTab() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    let text = "AB\tC"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // After "AB" cursor is at col 2, tab moves to col 8
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 8, &cell)
+    #expect(cell.character == UInt32(Character("C").asciiValue!))
+}
+
+@Test func testBackspace() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Write AB, backspace, write C — should overwrite B
+    let text = "AB\u{08}C"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cellA = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cellA)
+    #expect(cellA.character == UInt32(Character("A").asciiValue!))
+
+    var cellC = VTCell()
+    vt_parser_get_cell(&parser, 0, 1, &cellC)
+    #expect(cellC.character == UInt32(Character("C").asciiValue!))
+}
+
+// MARK: - OSC Test
+
+@Test func testOSCSkipped() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // OSC to set window title, terminated by BEL
+    let text = "\u{1B}]0;My Title\u{07}Hello"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var buf = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    let line = String(cString: buf)
+    #expect(line == "Hello")
+}
+
+// MARK: - Line Wrapping Test
+
+@Test func testLineWrap() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 10, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Write 12 characters in a 10-col terminal — should wrap
+    let text = "ABCDEFGHIJKL"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var buf0 = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 0, &buf0, 256)
+    let line0 = String(cString: buf0)
+    #expect(line0 == "ABCDEFGHIJ")
+
+    var buf1 = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 1, &buf1, 256)
+    let line1 = String(cString: buf1)
+    #expect(line1 == "KL")
+}
+
+// MARK: - Edge Cases
+
+@Test func testEmptyFeed() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Feed empty data — should not crash
+    vt_parser_feed(&parser, "", 0)
+    vt_parser_feed(&parser, nil, 0)
+
+    #expect(parser.cursor_row == 0)
+    #expect(parser.cursor_col == 0)
+}
+
+@Test func testGetCellOutOfBounds() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Out of bounds — should return zeroed cell
+    var cell = VTCell()
+    cell.character = 999
+    vt_parser_get_cell(&parser, 100, 100, &cell)
+    #expect(cell.character == 0)
+}
+
+@Test func testGetLineOutOfBounds() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    var buf = [CChar](repeating: 0, count: 256)
+    let written = vt_parser_get_line(&parser, 100, &buf, 256)
+    #expect(written == 0)
+}

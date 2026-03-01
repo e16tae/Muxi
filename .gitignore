@@ -33,5 +33,8 @@ Package.resolved
 *.dylib
 *.dSYM/
 
+# ── Vendor (built by scripts/build-all.sh) ──────────────────────────
+vendor/
+
 # ── Claude Code ─────────────────────────────────────────────────────
 .claude/

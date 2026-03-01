@@ -46,6 +46,31 @@ final class TmuxControlService {
         let paneId: Int
     }
 
+    // MARK: - Line Accumulator
+
+    private var lineBuffer = Data()
+
+    /// Accumulate raw data from SSH, split on newlines, and dispatch
+    /// complete lines to handleLine().
+    func feed(_ data: Data) {
+        lineBuffer.append(data)
+
+        // Split on \n (0x0A), processing each complete line
+        while let newlineIndex = lineBuffer.firstIndex(of: 0x0A) {
+            let lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
+            lineBuffer = Data(lineBuffer[(newlineIndex + 1)...])
+
+            if let line = String(data: lineData, encoding: .utf8) {
+                handleLine(line)
+            }
+        }
+    }
+
+    /// Reset the line buffer (call on disconnect/reconnect).
+    func resetLineBuffer() {
+        lineBuffer = Data()
+    }
+
     // MARK: - Line Handling
 
     /// Parse a single line from tmux control mode output and dispatch

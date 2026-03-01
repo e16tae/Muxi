@@ -165,4 +165,106 @@ final class TmuxControlServiceTests: XCTestCase {
         service.handleLine("%session-changed $0 name")
         service.handleLine("%exit")
     }
+
+    // MARK: - Line Accumulator (feed)
+
+    func testFeedCompleteLine() {
+        let service = TmuxControlService()
+        var exitCalled = false
+
+        service.onExit = {
+            exitCalled = true
+        }
+
+        let data = Data("%exit\n".utf8)
+        service.feed(data)
+
+        XCTAssertTrue(exitCalled)
+    }
+
+    func testFeedPartialThenComplete() {
+        let service = TmuxControlService()
+        var receivedWindowId: String?
+
+        service.onWindowAdd = { windowId in
+            receivedWindowId = windowId
+        }
+
+        // Feed partial data first
+        service.feed(Data("%window".utf8))
+        XCTAssertNil(receivedWindowId, "Should not dispatch before newline")
+
+        // Complete the line
+        service.feed(Data("-add @5\n".utf8))
+        XCTAssertEqual(receivedWindowId, "@5")
+    }
+
+    func testFeedMultipleLines() {
+        let service = TmuxControlService()
+        var windowAddIds: [String] = []
+
+        service.onWindowAdd = { windowId in
+            windowAddIds.append(windowId)
+        }
+
+        let data = Data("%window-add @1\n%window-add @2\n".utf8)
+        service.feed(data)
+
+        XCTAssertEqual(windowAddIds.count, 2)
+        XCTAssertEqual(windowAddIds[0], "@1")
+        XCTAssertEqual(windowAddIds[1], "@2")
+    }
+
+    func testFeedChunkedData() {
+        let service = TmuxControlService()
+        var exitCalled = false
+
+        service.onExit = {
+            exitCalled = true
+        }
+
+        // Feed byte-by-byte
+        let fullLine = "%exit\n"
+        for byte in fullLine.utf8 {
+            service.feed(Data([byte]))
+        }
+
+        XCTAssertTrue(exitCalled)
+    }
+
+    func testResetLineBuffer() {
+        let service = TmuxControlService()
+        var receivedWindowId: String?
+
+        service.onWindowAdd = { windowId in
+            receivedWindowId = windowId
+        }
+
+        // Feed partial data
+        service.feed(Data("%window-add @".utf8))
+        XCTAssertNil(receivedWindowId)
+
+        // Reset clears the buffer
+        service.resetLineBuffer()
+
+        // Feed a fresh complete line — old partial data is gone
+        service.feed(Data("%window-add @9\n".utf8))
+        XCTAssertEqual(receivedWindowId, "@9")
+    }
+
+    func testFeedWithCarriageReturn() {
+        let service = TmuxControlService()
+        var receivedData: String?
+
+        service.onPaneOutput = { _, data in
+            receivedData = data
+        }
+
+        // \r\n — only splits on \n, \r stays in the line
+        let data = Data("%output %0 hello\\n\r\n".utf8)
+        service.feed(data)
+
+        // The line passed to handleLine includes the \r
+        XCTAssertNotNil(receivedData)
+    }
 }

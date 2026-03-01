@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - ConnectionState
 
@@ -29,6 +30,7 @@ enum ConnectionState: Equatable, Sendable {
 @MainActor
 @Observable
 final class ConnectionManager {
+    private let logger = Logger(subsystem: "com.muxi.app", category: "ConnectionManager")
     private let sshService: SSHServiceProtocol
     private let tmuxService = TmuxControlService()
     private let keychainService = KeychainService()
@@ -351,9 +353,9 @@ final class ConnectionManager {
             Task { await self.reconnect() }
         }
 
-        tmuxService.onError = { message in
+        tmuxService.onError = { [weak self] message in
             // Log error but don't disconnect -- tmux errors can be non-fatal.
-            print("[TmuxControl] Error: \(message)")
+            self?.logger.error("TmuxControl error: \(message)")
         }
     }
 

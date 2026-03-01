@@ -1,6 +1,7 @@
 import MetalKit
 import CoreText
 import UIKit
+import os
 
 // MARK: - TerminalRenderer
 
@@ -19,6 +20,8 @@ import UIKit
 /// mtkView.delegate = renderer
 /// ```
 final class TerminalRenderer: NSObject, MTKViewDelegate {
+
+    private let logger = Logger(subsystem: "com.muxi.app", category: "TerminalRenderer")
 
     // MARK: - Configuration
 
@@ -235,12 +238,12 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     /// defined in `Shaders.metal`.
     private func buildPipeline() {
         guard let library = device.makeDefaultLibrary() else {
-            print("[TerminalRenderer] Failed to load default Metal library")
+            logger.error("Failed to load default Metal library")
             return
         }
         guard let vertexFunc = library.makeFunction(name: "terminalVertex"),
               let fragmentFunc = library.makeFunction(name: "terminalFragment") else {
-            print("[TerminalRenderer] Failed to load shader functions")
+            logger.error("Failed to load shader functions")
             return
         }
 
@@ -259,7 +262,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         do {
             pipelineState = try device.makeRenderPipelineState(descriptor: desc)
         } catch {
-            print("[TerminalRenderer] Pipeline creation failed: \(error)")
+            logger.error("Pipeline creation failed: \(error)")
         }
     }
 

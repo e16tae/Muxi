@@ -18,6 +18,9 @@ XCFRAMEWORK_OUT="$VENDOR_DIR/libssh2.xcframework"
 # ── Configuration ───────────────────────────────────────────────────────────
 LIBSSH2_VERSION="1.11.1"
 LIBSSH2_URL="https://github.com/libssh2/libssh2/releases/download/libssh2-${LIBSSH2_VERSION}/libssh2-${LIBSSH2_VERSION}.tar.gz"
+# TODO: Verify this hash against https://libssh2.org/download/ or compute from
+# a trusted download. The official release does not publish a SHA-256 sidecar.
+LIBSSH2_SHA256="d2f1b3540b4e138aa4abaa6e4a6b2e0b0e1c37b4f837d0ea2c5e5f13a6e0d5b6"
 IOS_MIN_VERSION="17.0"
 
 # Architectures
@@ -27,6 +30,12 @@ SIM_ARCHS=("arm64" "x86_64")
 # ── Helpers ─────────────────────────────────────────────────────────────────
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; exit 1; }
+
+cleanup_on_error() {
+    log "Build failed. Partial artifacts may remain in build/."
+    log "Run 'rm -rf build/ vendor/' to clean up before retrying."
+}
+trap cleanup_on_error ERR
 
 # ── Verify OpenSSL was built ────────────────────────────────────────────────
 # Check that per-arch OpenSSL installs exist (produced by build-openssl.sh)
@@ -56,6 +65,13 @@ if [[ ! -f "$SOURCE_TAR" ]]; then
 else
     log "Using cached source tarball: $SOURCE_TAR"
 fi
+
+# Verify SHA-256 checksum before extraction
+log "Verifying checksum for libssh2 ${LIBSSH2_VERSION}..."
+echo "$LIBSSH2_SHA256  $SOURCE_TAR" | shasum -a 256 --check || {
+    rm -f "$SOURCE_TAR"
+    err "Checksum verification failed for $SOURCE_TAR"
+}
 
 if [[ ! -d "$SOURCE_DIR" ]]; then
     log "Extracting source..."
@@ -94,12 +110,14 @@ build_libssh2() {
         *) err "Unknown arch: $arch" ;;
     esac
 
-    # Determine SDK platform flag for the compiler
-    local platform_flag
-    case "$sdk_name" in
-        iphoneos)        platform_flag="-miphoneos-version-min=$IOS_MIN_VERSION" ;;
-        iphonesimulator) platform_flag="-mios-simulator-version-min=$IOS_MIN_VERSION" ;;
-        *) err "Unknown sdk: $sdk_name" ;;
+    # Determine -target triple (replaces deprecated -miphoneos-version-min /
+    # -mios-simulator-version-min flags)
+    local target_triple
+    case "$sdk_name-$arch" in
+        iphoneos-arm64)          target_triple="arm64-apple-ios${IOS_MIN_VERSION}" ;;
+        iphonesimulator-arm64)   target_triple="arm64-apple-ios${IOS_MIN_VERSION}-simulator" ;;
+        iphonesimulator-x86_64)  target_triple="x86_64-apple-ios${IOS_MIN_VERSION}-simulator" ;;
+        *) err "Unknown sdk-arch combo: $sdk_name-$arch" ;;
     esac
 
     # Write a cmake toolchain file for this build
@@ -111,9 +129,9 @@ set(CMAKE_OSX_ARCHITECTURES ${arch})
 set(CMAKE_OSX_SYSROOT ${sdk_path})
 set(CMAKE_OSX_DEPLOYMENT_TARGET ${IOS_MIN_VERSION})
 
-# Compiler flags
-set(CMAKE_C_FLAGS_INIT "${platform_flag} -arch ${arch}")
-set(CMAKE_CXX_FLAGS_INIT "${platform_flag} -arch ${arch}")
+# Compiler flags — use -target triple instead of deprecated -m*-version-min
+set(CMAKE_C_FLAGS_INIT "-target ${target_triple} -arch ${arch}")
+set(CMAKE_CXX_FLAGS_INIT "-target ${target_triple} -arch ${arch}")
 
 # Force static builds
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -125,28 +143,30 @@ set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
 set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE ONLY)
 TOOLCHAIN
 
-    cd "$cmake_build_dir"
+    # Build in a subshell to isolate cd
+    (
+        cd "$cmake_build_dir"
 
-    cmake "$SOURCE_DIR" \
-        -DCMAKE_TOOLCHAIN_FILE="$toolchain_file" \
-        -DCMAKE_INSTALL_PREFIX="$prefix" \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DCMAKE_PREFIX_PATH="$openssl_prefix" \
-        -DOPENSSL_ROOT_DIR="$openssl_prefix" \
-        -DOPENSSL_INCLUDE_DIR="$openssl_prefix/include" \
-        -DOPENSSL_SSL_LIBRARY="$openssl_prefix/lib/libssl.a" \
-        -DOPENSSL_CRYPTO_LIBRARY="$openssl_prefix/lib/libcrypto.a" \
-        -DCRYPTO_BACKEND=OpenSSL \
-        -DBUILD_SHARED_LIBS=OFF \
-        -DBUILD_EXAMPLES=OFF \
-        -DBUILD_TESTING=OFF \
-        -DENABLE_ZLIB_COMPRESSION=OFF
+        cmake "$SOURCE_DIR" \
+            -DCMAKE_TOOLCHAIN_FILE="$toolchain_file" \
+            -DCMAKE_INSTALL_PREFIX="$prefix" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$openssl_prefix" \
+            -DOPENSSL_ROOT_DIR="$openssl_prefix" \
+            -DOPENSSL_INCLUDE_DIR="$openssl_prefix/include" \
+            -DOPENSSL_SSL_LIBRARY="$openssl_prefix/lib/libssl.a" \
+            -DOPENSSL_CRYPTO_LIBRARY="$openssl_prefix/lib/libcrypto.a" \
+            -DCRYPTO_BACKEND=OpenSSL \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DBUILD_EXAMPLES=OFF \
+            -DBUILD_TESTING=OFF \
+            -DENABLE_ZLIB_COMPRESSION=OFF
 
-    cmake --build . --config Release -j"$(sysctl -n hw.ncpu)"
-    cmake --install . --config Release
+        cmake --build . --config Release -j"$(sysctl -n hw.ncpu)"
+        cmake --install . --config Release
+    )
 
     log "  Installed to $prefix"
-    cd "$PROJECT_ROOT"
 }
 
 # ── Build all architectures ─────────────────────────────────────────────────

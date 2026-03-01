@@ -17,6 +17,8 @@ XCFRAMEWORK_OUT="$VENDOR_DIR/openssl.xcframework"
 # ── Configuration ───────────────────────────────────────────────────────────
 OPENSSL_VERSION="3.4.1"
 OPENSSL_URL="https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION}/openssl-${OPENSSL_VERSION}.tar.gz"
+# SHA-256 from official GitHub release sidecar: openssl-3.4.1.tar.gz.sha256
+OPENSSL_SHA256="002a2d6b30b58bf4bea46c43bdd96365aaf8daa6c428782aa4feee06da197df3"
 IOS_MIN_VERSION="17.0"
 
 # Architectures
@@ -26,6 +28,12 @@ SIM_ARCHS=("arm64" "x86_64")
 # ── Helpers ─────────────────────────────────────────────────────────────────
 log() { echo "==> $*"; }
 err() { echo "ERROR: $*" >&2; exit 1; }
+
+cleanup_on_error() {
+    log "Build failed. Partial artifacts may remain in build/."
+    log "Run 'rm -rf build/ vendor/' to clean up before retrying."
+}
+trap cleanup_on_error ERR
 
 # ── Skip if already built ──────────────────────────────────────────────────
 if [[ -d "$XCFRAMEWORK_OUT" ]]; then
@@ -46,6 +54,13 @@ if [[ ! -f "$SOURCE_TAR" ]]; then
 else
     log "Using cached source tarball: $SOURCE_TAR"
 fi
+
+# Verify SHA-256 checksum before extraction
+log "Verifying checksum for OpenSSL ${OPENSSL_VERSION}..."
+echo "$OPENSSL_SHA256  $SOURCE_TAR" | shasum -a 256 --check || {
+    rm -f "$SOURCE_TAR"
+    err "Checksum verification failed for $SOURCE_TAR"
+}
 
 if [[ ! -d "$SOURCE_DIR" ]]; then
     log "Extracting source..."
@@ -80,34 +95,46 @@ build_openssl() {
         *) err "Unknown sdk-arch combo: $sdk_name-$arch" ;;
     esac
 
+    # Determine -target triple (replaces deprecated -mios-version-min flags)
+    local target_triple
+    case "$sdk_name-$arch" in
+        iphoneos-arm64)          target_triple="arm64-apple-ios${IOS_MIN_VERSION}" ;;
+        iphonesimulator-arm64)   target_triple="arm64-apple-ios${IOS_MIN_VERSION}-simulator" ;;
+        iphonesimulator-x86_64)  target_triple="x86_64-apple-ios${IOS_MIN_VERSION}-simulator" ;;
+        *) err "Unknown sdk-arch combo: $sdk_name-$arch" ;;
+    esac
+
     # Clean build directory — OpenSSL Configure requires building in-tree
     local work_dir="$BUILD_DIR/build-${sdk_name}-${arch}"
     rm -rf "$work_dir"
     cp -R "$SOURCE_DIR" "$work_dir"
-    cd "$work_dir"
 
-    # Configure
-    ./Configure "$target" \
-        --prefix="$prefix" \
-        --openssldir="$prefix/ssl" \
-        -isysroot "$sdk_path" \
-        -arch "$arch" \
-        -mios-version-min="$IOS_MIN_VERSION" \
-        no-shared \
-        no-dso \
-        no-hw \
-        no-engine \
-        no-tests \
-        no-ui-console \
-        no-async \
-        no-stdio
+    # Build in a subshell to isolate cd
+    (
+        cd "$work_dir"
 
-    # Build and install (no apps, no docs)
-    make -j"$(sysctl -n hw.ncpu)" build_libs
-    make install_dev DESTDIR=""
+        # Configure
+        ./Configure "$target" \
+            --prefix="$prefix" \
+            --openssldir="$prefix/ssl" \
+            -isysroot "$sdk_path" \
+            -arch "$arch" \
+            -target "$target_triple" \
+            no-shared \
+            no-dso \
+            no-hw \
+            no-engine \
+            no-tests \
+            no-ui-console \
+            no-async \
+            no-stdio
+
+        # Build and install (no apps, no docs)
+        make -j"$(sysctl -n hw.ncpu)" build_libs
+        make install_dev DESTDIR=""
+    )
 
     log "  Installed to $prefix"
-    cd "$PROJECT_ROOT"
 }
 
 # ── Build all architectures ─────────────────────────────────────────────────

@@ -45,7 +45,7 @@ final class TmuxControlServiceTests: XCTestCase {
     func testHandleControlModeOutput() {
         let service = TmuxControlService()
         var receivedPaneId: String?
-        var receivedData: String?
+        var receivedData: Data?
 
         service.onPaneOutput = { paneId, data in
             receivedPaneId = paneId

@@ -12,7 +12,7 @@ struct ThemeSettingsView: View {
                 themeManager.selectTheme(theme)
             } label: {
                 HStack {
-                    VStack(alignment: .leading, spacing: 4) {
+                    VStack(alignment: .leading, spacing: MuxiTokens.Spacing.xs) {
                         Text(theme.name)
                             .font(.body)
                             .foregroundStyle(.primary)
@@ -31,7 +31,7 @@ struct ThemeSettingsView: View {
 
                     if theme.id == themeManager.currentTheme.id {
                         Image(systemName: "checkmark")
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(MuxiTokens.Colors.accentDefault)
                     }
                 }
             }

@@ -79,6 +79,17 @@ struct RadiusTokenTests {
     }
 }
 
+@Suite("Design Tokens — Typography")
+struct TypographyTokenTests {
+    @Test func allTypographyTokensExist() {
+        _ = MuxiTokens.Typography.largeTitle
+        _ = MuxiTokens.Typography.title
+        _ = MuxiTokens.Typography.body
+        _ = MuxiTokens.Typography.caption
+        _ = MuxiTokens.Typography.label
+    }
+}
+
 @Suite("Design Tokens — Motion")
 struct MotionTokenTests {
     @Test func motionTokensExist() {
@@ -88,10 +99,19 @@ struct MotionTokenTests {
         _ = MuxiTokens.Motion.subtle
     }
 
-    @Test func reducedMotionReturnsSubtleAnimations() {
+    @Test func resolvedMotionBothPaths() {
+        // Both paths should produce valid animations without crashing
         let reduced = MuxiTokens.Motion.resolved(reduceMotion: true)
+        let normal = MuxiTokens.Motion.resolved(reduceMotion: false)
+
+        // Verify reduced and normal both resolve all properties
         _ = reduced.appear
         _ = reduced.tap
         _ = reduced.transition
+        _ = reduced.subtle
+        _ = normal.appear
+        _ = normal.tap
+        _ = normal.transition
+        _ = normal.subtle
     }
 }

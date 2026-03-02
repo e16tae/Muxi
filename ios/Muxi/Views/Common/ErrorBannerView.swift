@@ -11,9 +11,9 @@ enum BannerStyle {
     /// Tint color associated with this style.
     var color: Color {
         switch self {
-        case .error:   return .red
-        case .warning: return .orange
-        case .info:    return .blue
+        case .error:   return MuxiTokens.Colors.error
+        case .warning: return MuxiTokens.Colors.warning
+        case .info:    return MuxiTokens.Colors.info
         }
     }
 
@@ -56,7 +56,7 @@ struct ErrorBannerView: View {
     var onRetry: (() -> Void)?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MuxiTokens.Spacing.sm) {
             HStack(alignment: .top, spacing: 10) {
                 // Leading icon
                 Image(systemName: style.icon)
@@ -98,16 +98,16 @@ struct ErrorBannerView: View {
                 .accessibilityLabel("Retry")
             }
         }
-        .padding(12)
+        .padding(MuxiTokens.Spacing.md)
         .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: MuxiTokens.Radius.md, style: .continuous)
                 .fill(style.color.opacity(0.12))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
+            RoundedRectangle(cornerRadius: MuxiTokens.Radius.md, style: .continuous)
                 .strokeBorder(style.color.opacity(0.3), lineWidth: 1)
         )
-        .padding(.horizontal, 16)
+        .padding(.horizontal, MuxiTokens.Spacing.lg)
         .transition(.move(edge: .top).combined(with: .opacity))
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(style.accessibilityLabel): \(message)")
@@ -132,17 +132,17 @@ struct ErrorBannerModifier: ViewModifier {
                     message: message,
                     style: style,
                     onDismiss: {
-                        withAnimation(.easeInOut(duration: 0.25)) {
+                        withAnimation(MuxiTokens.Motion.subtle) {
                             isPresented = false
                         }
                         onDismiss?()
                     },
                     onRetry: onRetry
                 )
-                .padding(.top, 8)
+                .padding(.top, MuxiTokens.Spacing.sm)
             }
         }
-        .animation(.easeInOut(duration: 0.25), value: isPresented)
+        .animation(MuxiTokens.Motion.subtle, value: isPresented)
     }
 }
 

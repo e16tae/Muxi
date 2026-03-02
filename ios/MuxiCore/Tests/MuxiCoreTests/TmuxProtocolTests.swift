@@ -47,82 +47,97 @@ private func string(from ptr: UnsafePointer<CChar>) -> String {
 
 @Test func testParseWindowAdd() {
     let line = "%window-add @1"
-    var msg = TmuxMessage()
-    let msgType = tmux_parse_line(line, &msg)
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
 
-    #expect(msgType == TMUX_MSG_WINDOW_ADD)
-    let windowId = withUnsafePointer(to: &msg.window_id.0) { string(from: $0) }
-    #expect(windowId == "@1")
+        #expect(msgType == TMUX_MSG_WINDOW_ADD)
+        let windowId = withUnsafePointer(to: &msg.window_id.0) { string(from: $0) }
+        #expect(windowId == "@1")
+    }
 }
 
 @Test func testParseWindowClose() {
     let line = "%window-close @2"
-    var msg = TmuxMessage()
-    let msgType = tmux_parse_line(line, &msg)
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
 
-    #expect(msgType == TMUX_MSG_WINDOW_CLOSE)
-    let windowId = withUnsafePointer(to: &msg.window_id.0) { string(from: $0) }
-    #expect(windowId == "@2")
+        #expect(msgType == TMUX_MSG_WINDOW_CLOSE)
+        let windowId = withUnsafePointer(to: &msg.window_id.0) { string(from: $0) }
+        #expect(windowId == "@2")
+    }
 }
 
 @Test func testParseSessionChanged() {
     let line = "%session-changed $0 my-session"
-    var msg = TmuxMessage()
-    let msgType = tmux_parse_line(line, &msg)
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
 
-    #expect(msgType == TMUX_MSG_SESSION_CHANGED)
-    let sessionId = withUnsafePointer(to: &msg.session_id.0) { string(from: $0) }
-    #expect(sessionId == "$0")
-    let sessionName = withUnsafePointer(to: &msg.session_name.0) { string(from: $0) }
-    #expect(sessionName == "my-session")
+        #expect(msgType == TMUX_MSG_SESSION_CHANGED)
+        let sessionId = withUnsafePointer(to: &msg.session_id.0) { string(from: $0) }
+        #expect(sessionId == "$0")
+        let sessionName = withUnsafePointer(to: &msg.session_name.0) { string(from: $0) }
+        #expect(sessionName == "my-session")
+    }
 }
 
 @Test func testParseBegin() {
     let line = "%begin 1234567890 1 0"
-    var msg = TmuxMessage()
-    let msgType = tmux_parse_line(line, &msg)
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
 
-    #expect(msgType == TMUX_MSG_BEGIN)
-    #expect(msg.timestamp == 1234567890)
-    #expect(msg.command_number == 1)
-    #expect(msg.flags == 0)
+        #expect(msgType == TMUX_MSG_BEGIN)
+        #expect(msg.timestamp == 1234567890)
+        #expect(msg.command_number == 1)
+        #expect(msg.flags == 0)
+    }
 }
 
 @Test func testParseEnd() {
     let line = "%end 1234567890 1 0"
-    var msg = TmuxMessage()
-    let msgType = tmux_parse_line(line, &msg)
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
 
-    #expect(msgType == TMUX_MSG_END)
-    #expect(msg.timestamp == 1234567890)
-    #expect(msg.command_number == 1)
-    #expect(msg.flags == 0)
+        #expect(msgType == TMUX_MSG_END)
+        #expect(msg.timestamp == 1234567890)
+        #expect(msg.command_number == 1)
+        #expect(msg.flags == 0)
+    }
 }
 
 @Test func testParseExit() {
     let line = "%exit"
-    var msg = TmuxMessage()
-    let msgType = tmux_parse_line(line, &msg)
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
 
-    #expect(msgType == TMUX_MSG_EXIT)
-    // No reason provided -- pointer should be nil
-    #expect(msg.exit_reason == nil)
+        #expect(msgType == TMUX_MSG_EXIT)
+        #expect(msg.exit_reason == nil)
+    }
 }
 
 @Test func testParseUnknownLine() {
     let line = "This is not a tmux message"
-    var msg = TmuxMessage()
-    let msgType = tmux_parse_line(line, &msg)
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
 
-    #expect(msgType == TMUX_MSG_UNKNOWN)
+        #expect(msgType == TMUX_MSG_UNKNOWN)
+    }
 }
 
 @Test func testParseEmptyLine() {
     let line = ""
-    var msg = TmuxMessage()
-    let msgType = tmux_parse_line(line, &msg)
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
 
-    #expect(msgType == TMUX_MSG_UNKNOWN)
+        #expect(msgType == TMUX_MSG_UNKNOWN)
+    }
 }
 
 // MARK: - Layout Parsing Tests
@@ -274,14 +289,16 @@ private func string(from ptr: UnsafePointer<CChar>) -> String {
 
 @Test func testParseSessionChangedWithSpacesInName() {
     let line = "%session-changed $5 my long session name"
-    var msg = TmuxMessage()
-    let msgType = tmux_parse_line(line, &msg)
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
 
-    #expect(msgType == TMUX_MSG_SESSION_CHANGED)
-    let sessionId = withUnsafePointer(to: &msg.session_id.0) { string(from: $0) }
-    #expect(sessionId == "$5")
-    let sessionName = withUnsafePointer(to: &msg.session_name.0) { string(from: $0) }
-    #expect(sessionName == "my long session name")
+        #expect(msgType == TMUX_MSG_SESSION_CHANGED)
+        let sessionId = withUnsafePointer(to: &msg.session_id.0) { string(from: $0) }
+        #expect(sessionId == "$5")
+        let sessionName = withUnsafePointer(to: &msg.session_name.0) { string(from: $0) }
+        #expect(sessionName == "my long session name")
+    }
 }
 
 @Test func testParseNullLine() {

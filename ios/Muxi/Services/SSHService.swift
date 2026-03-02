@@ -96,6 +96,13 @@ protocol SSHServiceProtocol: AnyObject {
     /// - Returns: An ``SSHChannel`` that the caller uses to send input and
     ///   resize events.
     func startShell(onData: @escaping (Data) -> Void) async throws -> SSHChannel
+
+    /// Write data to the active shell channel, serialized on the actor.
+    ///
+    /// This is the thread-safe alternative to calling `SSHChannel.write()`
+    /// directly from a different isolation context. All channel I/O goes
+    /// through the actor to avoid concurrent libssh2 access.
+    func writeToChannel(_ data: Data) async throws
 }
 
 // MARK: - LibSSH2Channel
@@ -363,6 +370,7 @@ actor SSHService: SSHServiceProtocol {
         readTask?.cancel()
         await readTask?.value  // Wait for read loop to exit
         readTask = nil
+        activeShellChannel = nil
         cleanupSession()
         updateState(.disconnected)
     }
@@ -523,6 +531,12 @@ actor SSHService: SSHServiceProtocol {
                     poll(&pollFd, 1, 50)  // Returns immediately when data arrives, up to 50ms
                     if Task.isCancelled { break }
                 }
+
+                // Yield to the actor's executor so queued messages (e.g.
+                // writeToChannel) can be processed between read iterations.
+                // Without this, the synchronous C calls above would
+                // monopolize the actor and starve pending writes.
+                await Task.yield()
             }
 
             // Restore blocking mode so subsequent cleanup calls succeed.
@@ -539,7 +553,20 @@ actor SSHService: SSHServiceProtocol {
             }
         }
 
+        self.activeShellChannel = sshChannel
         return sshChannel
+    }
+
+    // MARK: - Channel Write (Actor-Isolated)
+
+    /// The currently active shell channel, stored on the actor for thread-safe writes.
+    private var activeShellChannel: LibSSH2Channel?
+
+    func writeToChannel(_ data: Data) async throws {
+        guard let channel = activeShellChannel else {
+            throw SSHError.notConnected
+        }
+        try channel.write(data)
     }
 
     // MARK: - Private Helpers

@@ -1,11 +1,14 @@
 import SwiftUI
 import SwiftData
+import os
 
 struct ServerListView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \Server.name) private var servers: [Server]
     @State private var showingAddServer = false
     @State private var editingServer: Server?
+
+    private let logger = Logger(subsystem: "com.muxi.app", category: "ServerListView")
 
     /// Callback invoked when the user taps a server row to initiate a connection.
     var onServerTap: ((Server) -> Void)?
@@ -20,14 +23,7 @@ struct ServerListView: View {
                 }
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
-                        // Clean up Keychain secrets before deleting the model
-                        let keychainService = KeychainService()
-                        try? keychainService.deletePassword(account: server.id.uuidString)
-                        if case .key(let keyId) = server.authMethod {
-                            try? keychainService.deleteSSHKey(id: keyId)
-                        }
-                        modelContext.delete(server)
-                        try? modelContext.save()
+                        deleteServer(server)
                     } label: {
                         Label("Delete", systemImage: "trash")
                     }
@@ -53,6 +49,31 @@ struct ServerListView: View {
         }
         .sheet(item: $editingServer) { server in
             ServerEditView(server: server)
+        }
+    }
+
+    // MARK: - Helpers
+
+    /// Delete a server and clean up its Keychain secrets.
+    private func deleteServer(_ server: Server) {
+        let keychainService = KeychainService()
+        do {
+            try keychainService.deletePassword(account: server.id.uuidString)
+        } catch {
+            logger.error("Failed to delete Keychain password for server \(server.name): \(error.localizedDescription)")
+        }
+        if case .key(let keyId) = server.authMethod {
+            do {
+                try keychainService.deleteSSHKey(id: keyId)
+            } catch {
+                logger.error("Failed to delete SSH key for server \(server.name): \(error.localizedDescription)")
+            }
+        }
+        modelContext.delete(server)
+        do {
+            try modelContext.save()
+        } catch {
+            logger.error("Failed to save after deleting server \(server.name): \(error.localizedDescription)")
         }
     }
 }

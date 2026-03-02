@@ -30,8 +30,21 @@ DOWNLOAD_URL="https://github.com/jonz94/Sarasa-Gothic-Nerd-Fonts/releases/downlo
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
+# TODO: Verify this hash against trusted source (see build-openssl.sh for pattern)
+FONT_SHA256="SKIP"
+
 echo "==> Downloading Sarasa Mono SC Nerd Font (${RELEASE_TAG})..."
 curl -fSL "$DOWNLOAD_URL" -o "$TEMP_DIR/$ZIP_NAME"
+
+if [[ "$FONT_SHA256" != "SKIP" ]]; then
+    echo "==> Verifying checksum..."
+    echo "$FONT_SHA256  $TEMP_DIR/$ZIP_NAME" | shasum -a 256 --check || {
+        echo "ERROR: Checksum verification failed for font archive" >&2
+        exit 1
+    }
+else
+    echo "==> WARNING: Checksum verification skipped (set FONT_SHA256 to enable)"
+fi
 
 echo "==> Extracting Regular weight..."
 mkdir -p "$FONTS_DIR"

@@ -50,36 +50,36 @@ typedef struct {
     VTCell   current_attrs; // current color/attribute state
 
     // CSI parameter accumulation
-    int      csi_params[16];
-    int      csi_param_count;
-    int      csi_private;   // '?' prefix
+    int32_t  csi_params[16];
+    int32_t  csi_param_count;
+    int32_t  csi_private;   // '?' prefix
 
     // Scroll region
-    int      scroll_top;
-    int      scroll_bottom;
+    int32_t  scroll_top;
+    int32_t  scroll_bottom;
 
     // UTF-8 accumulation
     uint8_t  utf8_buf[4];
-    int      utf8_len;
-    int      utf8_expected;
+    int32_t  utf8_len;
+    int32_t  utf8_expected;
 } VTParserState;
 
 // Initialize parser with given dimensions
-void vt_parser_init(VTParserState *parser, int cols, int rows);
+void vt_parser_init(VTParserState *parser, int32_t cols, int32_t rows);
 
 // Free parser resources
 void vt_parser_destroy(VTParserState *parser);
 
 // Feed data into the parser
-void vt_parser_feed(VTParserState *parser, const char *data, int len);
+void vt_parser_feed(VTParserState *parser, const char *data, int32_t len);
 
 // Resize the terminal
-void vt_parser_resize(VTParserState *parser, int cols, int rows);
+void vt_parser_resize(VTParserState *parser, int32_t cols, int32_t rows);
 
 // Get a line as plain text (for debugging). Returns chars written.
-int vt_parser_get_line(VTParserState *parser, int row, char *buf, int buf_size);
+int32_t vt_parser_get_line(const VTParserState *parser, int32_t row, char *buf, int32_t buf_size);
 
 // Get a specific cell
-void vt_parser_get_cell(VTParserState *parser, int row, int col, VTCell *out);
+void vt_parser_get_cell(const VTParserState *parser, int32_t row, int32_t col, VTCell *out);
 
 #endif

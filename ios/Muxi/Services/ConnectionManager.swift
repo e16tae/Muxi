@@ -50,6 +50,9 @@ final class ConnectionManager {
     /// Current pane layout from tmux.
     private(set) var currentPanes: [TmuxControlService.ParsedPane] = []
 
+    /// The SSH service (exposed for actor-routed channel writes).
+    var sshServiceForWrites: SSHServiceProtocol { sshService }
+
     /// The active SSH shell channel (for tmux control mode).
     private(set) var activeChannel: SSHChannel?
 
@@ -166,9 +169,9 @@ final class ConnectionManager {
 
         activeChannel = channel
 
-        // Send tmux -CC attach command through the shell.
+        // Send tmux -CC attach command through the shell (actor-routed).
         let command = "tmux -CC attach -t \(session.name.shellEscaped())\n"
-        try channel.write(Data(command.utf8))
+        try await sshService.writeToChannel(Data(command.utf8))
 
         state = .attached(sessionName: session.name)
 
@@ -192,9 +195,9 @@ final class ConnectionManager {
     func detach() {
         sshMonitorTask?.cancel()
         sshMonitorTask = nil
-        // Send detach command if channel is active.
-        if let channel = activeChannel {
-            try? channel.write(Data("detach\n".utf8))
+        // Send detach command if channel is active (actor-routed).
+        Task {
+            try? await sshService.writeToChannel(Data("detach\n".utf8))
         }
         activeChannel = nil  // Don't close — SSHService owns the channel lifecycle
         tmuxService.resetLineBuffer()
@@ -350,6 +353,8 @@ final class ConnectionManager {
 
         tmuxService.onExit = { [weak self] in
             guard let self else { return }
+            // Only reconnect if we were attached (not manually detaching).
+            guard case .attached = self.state else { return }
             Task { await self.reconnect() }
         }
 

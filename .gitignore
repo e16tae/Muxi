@@ -39,5 +39,8 @@ vendor/
 # ── Fonts (downloaded by scripts/download-fonts.sh) ────────────────
 ios/Muxi/Resources/Fonts/*.ttf
 
+# ── Test Results ────────────────────────────────────────────────────
+*.xcresult
+
 # ── Claude Code ─────────────────────────────────────────────────────
 .claude/

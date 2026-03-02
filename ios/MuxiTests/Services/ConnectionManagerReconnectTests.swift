@@ -40,6 +40,10 @@ final class ReconnectMockSSHService: SSHServiceProtocol {
         guard state == .connected else { throw SSHError.notConnected }
         return MockSSHChannel()
     }
+
+    func writeToChannel(_ data: Data) async throws {
+        guard state == .connected else { throw SSHError.notConnected }
+    }
 }
 
 // MARK: - ConnectionManagerReconnectTests

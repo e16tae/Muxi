@@ -156,17 +156,20 @@ final class KeychainService {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-        guard status == errSecSuccess,
-              let dict = result as? [String: Any],
+        guard status == errSecSuccess else {
+            if status == errSecItemNotFound {
+                throw KeychainError.itemNotFound
+            }
+            throw KeychainError.unexpectedStatus(status)
+        }
+
+        guard let dict = result as? [String: Any],
               let privateKeyData = dict[kSecValueData as String] as? Data,
               let comment = dict[kSecAttrComment as String] as? String,
               let metadataData = comment.data(using: .utf8),
               let sshKey = try? JSONDecoder().decode(SSHKey.self, from: metadataData)
         else {
-            if status == errSecItemNotFound {
-                throw KeychainError.itemNotFound
-            }
-            throw KeychainError.unexpectedStatus(status)
+            throw KeychainError.dataConversionFailed
         }
 
         return (sshKey, privateKeyData)

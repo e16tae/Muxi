@@ -1,149 +1,160 @@
-import XCTest
+import Testing
 @testable import Muxi
 
-final class ThemeTests: XCTestCase {
+@Suite("Theme")
+struct ThemeTests {
 
     // MARK: - Default Theme Properties
 
-    func testDefaultThemeHas16AnsiColors() {
+    @Test("default theme has 16 ANSI colors")
+    func defaultThemeHas16AnsiColors() {
         let theme = Theme.default
-        XCTAssertEqual(theme.ansiColors.count, 16)
+        #expect(theme.ansiColors.count == 16)
     }
 
-    func testDefaultThemeIdentifiableId() {
+    @Test("default theme identifiable id")
+    func defaultThemeIdentifiableId() {
         let theme = Theme.default
-        XCTAssertEqual(theme.id, "catppuccin-mocha")
+        #expect(theme.id == "catppuccin-mocha")
     }
 
-    func testDefaultThemeName() {
+    @Test("default theme name")
+    func defaultThemeName() {
         let theme = Theme.default
-        XCTAssertEqual(theme.name, "Catppuccin Mocha")
+        #expect(theme.name == "Catppuccin Mocha")
     }
 
     // MARK: - Codable Round-Trip
 
-    func testCodableRoundTrip() throws {
+    @Test("codable round-trip preserves theme")
+    func codableRoundTrip() throws {
         let original = Theme.catppuccinMocha
-        let encoder = JSONEncoder()
-        let data = try encoder.encode(original)
-        let decoder = JSONDecoder()
-        let decoded = try decoder.decode(Theme.self, from: data)
-        XCTAssertEqual(original, decoded)
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(Theme.self, from: data)
+        #expect(original == decoded)
     }
 
-    func testThemeColorCodableRoundTrip() throws {
+    @Test("ThemeColor codable round-trip")
+    func themeColorCodableRoundTrip() throws {
         let original = ThemeColor(r: 128, g: 64, b: 255)
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(ThemeColor.self, from: data)
-        XCTAssertEqual(original, decoded)
+        #expect(original == decoded)
     }
 
     // MARK: - resolve(.default, ...)
 
-    func testResolveDefaultForeground() {
+    @Test("resolve default foreground returns theme foreground")
+    func resolveDefaultForeground() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.default, isForeground: true)
-        XCTAssertEqual(resolved, theme.foreground)
+        #expect(resolved == theme.foreground)
     }
 
-    func testResolveDefaultBackground() {
+    @Test("resolve default background returns theme background")
+    func resolveDefaultBackground() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.default, isForeground: false)
-        XCTAssertEqual(resolved, theme.background)
+        #expect(resolved == theme.background)
     }
 
     // MARK: - resolve(.ansi(...), ...) for indices 0-15
 
-    func testResolveAnsi0() {
+    @Test("resolve ANSI 0 returns first ANSI color")
+    func resolveAnsi0() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.ansi(0), isForeground: true)
-        XCTAssertEqual(resolved, theme.ansiColors[0])
+        #expect(resolved == theme.ansiColors[0])
     }
 
-    func testResolveAnsi1ReturnsRed() {
+    @Test("resolve ANSI 1 returns red")
+    func resolveAnsi1ReturnsRed() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.ansi(1), isForeground: true)
-        // Catppuccin Mocha red: #F38BA8
-        XCTAssertEqual(resolved, ThemeColor(r: 243, g: 139, b: 168))
+        #expect(resolved == ThemeColor(r: 243, g: 139, b: 168))
     }
 
-    func testResolveAnsi15() {
+    @Test("resolve ANSI 15 returns last ANSI color")
+    func resolveAnsi15() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.ansi(15), isForeground: true)
-        XCTAssertEqual(resolved, theme.ansiColors[15])
+        #expect(resolved == theme.ansiColors[15])
     }
 
     // MARK: - resolve(.ansi(...), ...) for 256-color cube (16-231)
 
-    func testResolveAnsi16IsBlack() {
-        // Index 16 = first entry of the 6x6x6 cube = (0,0,0)
+    @Test("resolve ANSI 16 is black (start of color cube)")
+    func resolveAnsi16IsBlack() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.ansi(16), isForeground: true)
-        XCTAssertEqual(resolved, ThemeColor(r: 0, g: 0, b: 0))
+        #expect(resolved == ThemeColor(r: 0, g: 0, b: 0))
     }
 
-    func testResolveAnsi21() {
-        // Index 21 = adjusted 5 -> r=0, g=0, b=5*51=255
+    @Test("resolve ANSI 21 is blue")
+    func resolveAnsi21() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.ansi(21), isForeground: true)
-        XCTAssertEqual(resolved, ThemeColor(r: 0, g: 0, b: 255))
+        #expect(resolved == ThemeColor(r: 0, g: 0, b: 255))
     }
 
-    func testResolveAnsi196() {
-        // Index 196: adjusted = 180; r = (180/36)*51 = 5*51=255, g = ((180/6)%6)*51 = 0*51=0, b = (180%6)*51 = 0*51=0
+    @Test("resolve ANSI 196 is red")
+    func resolveAnsi196() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.ansi(196), isForeground: true)
-        XCTAssertEqual(resolved, ThemeColor(r: 255, g: 0, b: 0))
+        #expect(resolved == ThemeColor(r: 255, g: 0, b: 0))
     }
 
-    func testResolveAnsi231() {
-        // Index 231: adjusted = 215; r = (215/36)*51 = 5*51=255, g = ((215/6)%6)*51 = 5*51=255, b = (215%6)*51 = 5*51=255
+    @Test("resolve ANSI 231 is white")
+    func resolveAnsi231() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.ansi(231), isForeground: true)
-        XCTAssertEqual(resolved, ThemeColor(r: 255, g: 255, b: 255))
+        #expect(resolved == ThemeColor(r: 255, g: 255, b: 255))
     }
 
     // MARK: - resolve(.ansi(...), ...) for grayscale (232-255)
 
-    func testResolveAnsi232IsNearBlack() {
-        // Index 232: gray = 8 + (0)*10 = 8
+    @Test("resolve ANSI 232 is near black")
+    func resolveAnsi232IsNearBlack() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.ansi(232), isForeground: true)
-        XCTAssertEqual(resolved, ThemeColor(r: 8, g: 8, b: 8))
+        #expect(resolved == ThemeColor(r: 8, g: 8, b: 8))
     }
 
-    func testResolveAnsi255IsNearWhite() {
-        // Index 255: gray = 8 + (23)*10 = 238
+    @Test("resolve ANSI 255 is near white")
+    func resolveAnsi255IsNearWhite() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.ansi(255), isForeground: true)
-        XCTAssertEqual(resolved, ThemeColor(r: 238, g: 238, b: 238))
+        #expect(resolved == ThemeColor(r: 238, g: 238, b: 238))
     }
 
-    func testResolveAnsi244IsMidGray() {
-        // Index 244: gray = 8 + (12)*10 = 128
+    @Test("resolve ANSI 244 is mid gray")
+    func resolveAnsi244IsMidGray() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.ansi(244), isForeground: true)
-        XCTAssertEqual(resolved, ThemeColor(r: 128, g: 128, b: 128))
+        #expect(resolved == ThemeColor(r: 128, g: 128, b: 128))
     }
 
     // MARK: - resolve(.rgb(...), ...)
 
-    func testResolveRGBReturnsExactColor() {
+    @Test("resolve RGB returns exact color")
+    func resolveRGBReturnsExactColor() {
         let theme = Theme.catppuccinMocha
         let resolved = theme.resolve(.rgb(100, 200, 50), isForeground: true)
-        XCTAssertEqual(resolved, ThemeColor(r: 100, g: 200, b: 50))
+        #expect(resolved == ThemeColor(r: 100, g: 200, b: 50))
     }
 
-    func testResolveRGBIgnoresIsForeground() {
+    @Test("resolve RGB ignores isForeground")
+    func resolveRGBIgnoresIsForeground() {
         let theme = Theme.catppuccinMocha
         let fg = theme.resolve(.rgb(10, 20, 30), isForeground: true)
         let bg = theme.resolve(.rgb(10, 20, 30), isForeground: false)
-        XCTAssertEqual(fg, bg)
+        #expect(fg == bg)
     }
 
     // MARK: - load(from:) JSON Parsing
 
-    func testLoadFromValidJSON() {
+    @Test("load from valid JSON succeeds")
+    func loadFromValidJSON() throws {
         let json = """
         {
             "id": "test-theme",
@@ -174,25 +185,26 @@ final class ThemeTests: XCTestCase {
         """.data(using: .utf8)!
 
         let theme = Theme.load(from: json)
-        XCTAssertNotNil(theme)
-        XCTAssertEqual(theme?.id, "test-theme")
-        XCTAssertEqual(theme?.name, "Test Theme")
-        XCTAssertEqual(theme?.foreground, ThemeColor(r: 255, g: 255, b: 255))
-        XCTAssertEqual(theme?.background, ThemeColor(r: 0, g: 0, b: 0))
-        XCTAssertEqual(theme?.cursor, ThemeColor(r: 128, g: 128, b: 128))
-        XCTAssertEqual(theme?.selection, ThemeColor(r: 64, g: 64, b: 64))
-        XCTAssertEqual(theme?.ansiColors.count, 16)
-        XCTAssertEqual(theme?.ansiColors[1], ThemeColor(r: 255, g: 0, b: 0))
+        let unwrapped = try #require(theme)
+        #expect(unwrapped.id == "test-theme")
+        #expect(unwrapped.name == "Test Theme")
+        #expect(unwrapped.foreground == ThemeColor(r: 255, g: 255, b: 255))
+        #expect(unwrapped.background == ThemeColor(r: 0, g: 0, b: 0))
+        #expect(unwrapped.cursor == ThemeColor(r: 128, g: 128, b: 128))
+        #expect(unwrapped.selection == ThemeColor(r: 64, g: 64, b: 64))
+        #expect(unwrapped.ansiColors.count == 16)
+        #expect(unwrapped.ansiColors[1] == ThemeColor(r: 255, g: 0, b: 0))
     }
 
-    func testLoadFromInvalidJSONReturnsNil() {
+    @Test("load from invalid JSON returns nil")
+    func loadFromInvalidJSONReturnsNil() {
         let badJSON = "{ not valid json".data(using: .utf8)!
         let theme = Theme.load(from: badJSON)
-        XCTAssertNil(theme)
+        #expect(theme == nil)
     }
 
-    func testLoadFromIncompleteJSONReturnsNil() {
-        // Missing required fields
+    @Test("load from incomplete JSON returns nil")
+    func loadFromIncompleteJSONReturnsNil() {
         let incompleteJSON = """
         {
             "id": "incomplete",
@@ -200,18 +212,20 @@ final class ThemeTests: XCTestCase {
         }
         """.data(using: .utf8)!
         let theme = Theme.load(from: incompleteJSON)
-        XCTAssertNil(theme)
+        #expect(theme == nil)
     }
 
     // MARK: - Equatable
 
-    func testThemeEquatable() {
+    @Test("same themes are equal")
+    func themeEquatable() {
         let theme1 = Theme.catppuccinMocha
         let theme2 = Theme.catppuccinMocha
-        XCTAssertEqual(theme1, theme2)
+        #expect(theme1 == theme2)
     }
 
-    func testThemeNotEqual() {
+    @Test("different themes are not equal")
+    func themeNotEqual() {
         let theme1 = Theme.catppuccinMocha
         let theme2 = Theme(
             id: "other-theme",
@@ -222,30 +236,31 @@ final class ThemeTests: XCTestCase {
             selection: ThemeColor(r: 64, g: 64, b: 64),
             ansiColors: Array(repeating: ThemeColor(r: 0, g: 0, b: 0), count: 16)
         )
-        XCTAssertNotEqual(theme1, theme2)
+        #expect(theme1 != theme2)
     }
 
-    func testThemeColorEquatable() {
+    @Test("ThemeColor equatable")
+    func themeColorEquatable() {
         let c1 = ThemeColor(r: 10, g: 20, b: 30)
         let c2 = ThemeColor(r: 10, g: 20, b: 30)
         let c3 = ThemeColor(r: 10, g: 20, b: 31)
-        XCTAssertEqual(c1, c2)
-        XCTAssertNotEqual(c1, c3)
+        #expect(c1 == c2)
+        #expect(c1 != c3)
     }
 
     // MARK: - ThemeColor SwiftUI Color
 
-    func testThemeColorToSwiftUIColor() {
-        // Verify the computed property doesn't crash and returns a valid Color.
+    @Test("ThemeColor converts to SwiftUI Color")
+    func themeColorToSwiftUIColor() {
         let themeColor = ThemeColor(r: 128, g: 64, b: 255)
         let color = themeColor.color
-        // SwiftUI Color is opaque so we just verify it exists.
-        XCTAssertNotNil(color)
+        _ = color  // Verify it doesn't crash
     }
 
     // MARK: - Catppuccin Mocha JSON Consistency
 
-    func testCatppuccinMochaJSONMatchesHardcoded() throws {
+    @Test("Catppuccin Mocha JSON matches hardcoded theme")
+    func catppuccinMochaJSONMatchesHardcoded() throws {
         let json = """
         {
             "id": "catppuccin-mocha",
@@ -275,7 +290,26 @@ final class ThemeTests: XCTestCase {
         }
         """.data(using: .utf8)!
 
-        let fromJSON = try XCTUnwrap(Theme.load(from: json))
-        XCTAssertEqual(fromJSON, Theme.catppuccinMocha)
+        let fromJSON = try #require(Theme.load(from: json))
+        #expect(fromJSON == Theme.catppuccinMocha)
+    }
+
+    // MARK: - ansiColors Validation
+
+    @Test("decoding theme with wrong ansiColors count fails")
+    func decodingThemeWithWrongAnsiColorsCountFails() {
+        let json = """
+        {
+            "id": "bad-theme",
+            "name": "Bad Theme",
+            "foreground": {"r": 0, "g": 0, "b": 0},
+            "background": {"r": 0, "g": 0, "b": 0},
+            "cursor": {"r": 0, "g": 0, "b": 0},
+            "selection": {"r": 0, "g": 0, "b": 0},
+            "ansiColors": [{"r": 0, "g": 0, "b": 0}]
+        }
+        """.data(using: .utf8)!
+        let theme = Theme.load(from: json)
+        #expect(theme == nil)
     }
 }

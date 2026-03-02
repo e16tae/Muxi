@@ -373,8 +373,18 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc)
         else { return }
 
+        // Vertex rebuild reads TerminalBuffer which is mutated on @MainActor.
+        // Dispatch to main to avoid concurrent access from the render thread.
+        // Guard against deadlock when draw(in:) is called from the main thread
+        // (e.g. enableSetNeedsDisplay mode or manual draw() calls).
         if needsRedraw {
-            rebuildVertices()
+            if Thread.isMainThread {
+                rebuildVertices()
+            } else {
+                DispatchQueue.main.sync { [self] in
+                    rebuildVertices()
+                }
+            }
             needsRedraw = false
         }
 

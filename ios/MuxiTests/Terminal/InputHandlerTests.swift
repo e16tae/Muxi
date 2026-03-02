@@ -1,6 +1,7 @@
 import XCTest
 @testable import Muxi
 
+@MainActor
 final class InputHandlerTests: XCTestCase {
 
     private var handler: InputHandler!

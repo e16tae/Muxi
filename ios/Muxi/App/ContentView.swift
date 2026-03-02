@@ -206,8 +206,16 @@ struct ContentView: View {
                 // Password found in Keychain, connect directly.
                 connectToServer(server)
             } catch {
-                // No password in Keychain, prompt the user.
-                showingPasswordPrompt = true
+                if case KeychainError.itemNotFound = error {
+                    // No password in Keychain, prompt the user.
+                    showingPasswordPrompt = true
+                } else {
+                    // Keychain error (corrupt data, OS error) — show error banner.
+                    withAnimation {
+                        errorMessage = "Keychain error: \(error.localizedDescription)"
+                        showErrorBanner = true
+                    }
+                }
             }
         case .key:
             connectToServer(server)

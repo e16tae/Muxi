@@ -34,6 +34,38 @@ struct Theme: Codable, Identifiable, Equatable {
     /// The 16 ANSI colors (indices 0-15).
     let ansiColors: [ThemeColor]
 
+    private enum CodingKeys: String, CodingKey {
+        case id, name, foreground, background, cursor, selection, ansiColors
+    }
+
+    init(id: String, name: String, foreground: ThemeColor, background: ThemeColor,
+         cursor: ThemeColor, selection: ThemeColor, ansiColors: [ThemeColor]) {
+        self.id = id
+        self.name = name
+        self.foreground = foreground
+        self.background = background
+        self.cursor = cursor
+        self.selection = selection
+        self.ansiColors = ansiColors
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        foreground = try container.decode(ThemeColor.self, forKey: .foreground)
+        background = try container.decode(ThemeColor.self, forKey: .background)
+        cursor = try container.decode(ThemeColor.self, forKey: .cursor)
+        selection = try container.decode(ThemeColor.self, forKey: .selection)
+        ansiColors = try container.decode([ThemeColor].self, forKey: .ansiColors)
+        guard ansiColors.count == 16 else {
+            throw DecodingError.dataCorruptedError(
+                forKey: .ansiColors, in: container,
+                debugDescription: "ansiColors must contain exactly 16 entries, got \(ansiColors.count)"
+            )
+        }
+    }
+
     // MARK: - Color Resolution
 
     /// Resolve a `TerminalColor` to a concrete `ThemeColor` using this theme.

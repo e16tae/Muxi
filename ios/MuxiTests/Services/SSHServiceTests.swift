@@ -118,6 +118,10 @@ class MockSSHService: SSHServiceProtocol {
         return MockSSHChannel()
     }
 
+    func writeToChannel(_ data: Data) async throws {
+        guard state == .connected else { throw SSHError.notConnected }
+    }
+
     // MARK: Test Helpers
 
     func simulateConnect() { state = .connected }

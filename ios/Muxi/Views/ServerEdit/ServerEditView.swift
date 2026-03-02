@@ -131,9 +131,9 @@ struct ServerEditView: View {
 
         do {
             try modelContext.save()
+            dismiss()
         } catch {
             logger.error("Failed to save server: \(error.localizedDescription)")
         }
-        dismiss()
     }
 }

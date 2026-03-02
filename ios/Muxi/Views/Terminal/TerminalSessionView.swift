@@ -105,28 +105,32 @@ struct TerminalSessionView: View {
     ///
     /// In control mode, input to a pane is sent as a tmux `send-keys`
     /// command through the control channel, not directly to the pane.
+    /// Writes are routed through the SSHService actor for thread safety.
     private func sendToActivePane(_ data: Data) {
-        guard let paneId = activePaneId,
-              let channel = connectionManager.activeChannel else { return }
+        guard let paneId = activePaneId else { return }
 
         // Encode each byte as a hex key for send-keys
         let hexKeys = data.map { String(format: "0x%02x", $0) }.joined(separator: " ")
-        let command = "send-keys -t \(paneId) \(hexKeys)\n"
-        do {
-            try channel.write(Data(command.utf8))
-        } catch {
-            logger.error("Failed to send keys to pane \(paneId): \(error.localizedDescription)")
+        let command = "send-keys -t \(paneId.shellEscaped()) \(hexKeys)\n"
+        Task {
+            do {
+                try await connectionManager.sshServiceForWrites.writeToChannel(Data(command.utf8))
+            } catch {
+                logger.error("Failed to send keys to pane \(paneId): \(error.localizedDescription)")
+            }
         }
     }
 
     /// Send a tmux command through the control mode channel.
+    /// Writes are routed through the SSHService actor for thread safety.
     private func sendTmuxCommand(_ command: String) {
-        guard let channel = connectionManager.activeChannel else { return }
         let fullCommand = command + "\n"
-        do {
-            try channel.write(Data(fullCommand.utf8))
-        } catch {
-            logger.error("Failed to send tmux command: \(error.localizedDescription)")
+        Task {
+            do {
+                try await connectionManager.sshServiceForWrites.writeToChannel(Data(fullCommand.utf8))
+            } catch {
+                logger.error("Failed to send tmux command: \(error.localizedDescription)")
+            }
         }
     }
 }

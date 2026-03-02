@@ -60,6 +60,8 @@ struct PaneContainerView: View {
     let panes: [PaneInfo]
     let theme: Theme
     @Binding var activePaneId: String?
+    /// Called when the user taps a pane (iPad) or selects a tab (iPhone).
+    var onPaneTapped: ((String) -> Void)?
     @State private var selectedPaneIndex: Int = 0
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -113,6 +115,11 @@ struct PaneContainerView: View {
         VStack(spacing: 0) {
             if let pane = panes[safe: selectedPaneIndex] {
                 TerminalView(buffer: pane.buffer, theme: theme, channel: pane.channel)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        activePaneId = pane.id
+                        onPaneTapped?(pane.id)
+                    }
                     .onAppear { activePaneId = pane.id }
             }
 
@@ -131,6 +138,7 @@ struct PaneContainerView: View {
                     Button {
                         selectedPaneIndex = index
                         activePaneId = panes[index].id
+                        onPaneTapped?(panes[index].id)
                     } label: {
                         Text("Pane \(index + 1)")
                             .font(.caption)
@@ -180,6 +188,7 @@ struct PaneContainerView: View {
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 activePaneId = pane.id
+                                onPaneTapped?(pane.id)
                             }
                             .offset(x: frame.x, y: frame.y)
                     }

@@ -13,6 +13,9 @@ struct ExtendedKeyboardView: View {
     /// Callback invoked with the raw bytes to send over the SSH channel.
     var onInput: ((Data) -> Void)?
 
+    /// Callback to dismiss the software keyboard.
+    var onDismissKeyboard: (() -> Void)?
+
     // MARK: - Body
 
     var body: some View {
@@ -43,6 +46,21 @@ struct ExtendedKeyboardView: View {
                 .accessibilityLabel("Arrow Down")
             keyButton("\u{2192}") { send(key: .arrowRight) }  // right arrow
                 .accessibilityLabel("Arrow Right")
+
+            if onDismissKeyboard != nil {
+                Spacer()
+
+                Button { onDismissKeyboard?() } label: {
+                    Image(systemName: "keyboard.chevron.compact.down")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(theme.foreground.color)
+                        .frame(minWidth: 36, minHeight: 32)
+                        .background(theme.foreground.color.opacity(0.1))
+                        .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss Keyboard")
+            }
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)

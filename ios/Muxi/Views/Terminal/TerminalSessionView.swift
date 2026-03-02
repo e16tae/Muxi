@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreText
 import os
 
 /// The terminal session screen that combines all terminal-related components
@@ -14,6 +15,7 @@ struct TerminalSessionView: View {
     private let logger = Logger(subsystem: "com.muxi.app", category: "TerminalSession")
     @State private var activePaneId: String?
     @State private var inputHandler = InputHandler()
+    @State private var isKeyboardActive = false
 
     /// Build pane info from ConnectionManager's live pane data.
     private var panes: [PaneContainerView.PaneInfo] {
@@ -37,23 +39,48 @@ struct TerminalSessionView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 if panes.isEmpty {
-                    // Show placeholder while waiting for tmux layout data
                     placeholderView
                 } else {
-                    // Terminal panes
-                    PaneContainerView(
-                        panes: panes,
-                        theme: themeManager.currentTheme,
-                        activePaneId: $activePaneId
-                    )
+                    GeometryReader { geometry in
+                        PaneContainerView(
+                            panes: panes,
+                            theme: themeManager.currentTheme,
+                            activePaneId: $activePaneId,
+                            onPaneTapped: { _ in
+                                isKeyboardActive = true
+                            }
+                        )
+                        .onChange(of: geometry.size) { _, newSize in
+                            updateTerminalSize(newSize)
+                        }
+                        .onAppear {
+                            updateTerminalSize(geometry.size)
+                        }
+                    }
                 }
 
-                // Extended keyboard toolbar
+                TerminalInputView(
+                    onText: { text in
+                        for char in text {
+                            let data = inputHandler.data(for: char)
+                            sendToActivePane(data)
+                        }
+                    },
+                    onDelete: {
+                        sendToActivePane(Data([0x7F]))
+                    },
+                    isActive: $isKeyboardActive
+                )
+                .frame(width: 0, height: 0)
+
                 ExtendedKeyboardView(
                     theme: themeManager.currentTheme,
                     inputHandler: inputHandler,
                     onInput: { data in
                         sendToActivePane(data)
+                    },
+                    onDismissKeyboard: {
+                        isKeyboardActive = false
                     }
                 )
             }
@@ -78,11 +105,38 @@ struct TerminalSessionView: View {
             .navigationBarTitleDisplayMode(.inline)
         }
         .onChange(of: panes) { _, newPanes in
-            // Auto-select first pane if none is active
             if activePaneId == nil, let first = newPanes.first {
                 activePaneId = first.id
+                isKeyboardActive = true
             }
         }
+    }
+
+    // MARK: - Terminal Sizing
+
+    /// Calculate terminal columns and rows from the available view size
+    /// and notify tmux so TUI apps can adapt.
+    private func updateTerminalSize(_ size: CGSize) {
+        let (cellW, cellH) = Self.terminalCellSize()
+        guard cellW > 0, cellH > 0 else { return }
+
+        let cols = max(Int(size.width / cellW), 1)
+        let rows = max(Int(size.height / cellH), 1)
+        connectionManager.resizeTerminal(cols: cols, rows: rows)
+    }
+
+    /// Calculate monospace cell dimensions using the same font the
+    /// renderer uses. This avoids coupling the view to the renderer.
+    static func terminalCellSize() -> (width: CGFloat, height: CGFloat) {
+        let font = UIFont(name: "Sarasa Mono SC Nerd Font", size: 14)
+            ?? UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        let ctFont = CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil)
+        var glyph = CTFontGetGlyphWithName(ctFont, "M" as CFString)
+        var advance = CGSize.zero
+        CTFontGetAdvancesForGlyphs(ctFont, .horizontal, &glyph, &advance, 1)
+        let w = ceil(advance.width)
+        let h = ceil(CTFontGetAscent(ctFont) + CTFontGetDescent(ctFont) + CTFontGetLeading(ctFont))
+        return (w, h)
     }
 
     // MARK: - Placeholder
@@ -102,14 +156,9 @@ struct TerminalSessionView: View {
     // MARK: - Input Handling
 
     /// Send raw data to the active pane via tmux control mode.
-    ///
-    /// In control mode, input to a pane is sent as a tmux `send-keys`
-    /// command through the control channel, not directly to the pane.
-    /// Writes are routed through the SSHService actor for thread safety.
     private func sendToActivePane(_ data: Data) {
         guard let paneId = activePaneId else { return }
 
-        // Encode each byte as a hex key for send-keys
         let hexKeys = data.map { String(format: "0x%02x", $0) }.joined(separator: " ")
         let command = "send-keys -t \(paneId.shellEscaped()) \(hexKeys)\n"
         Task {
@@ -122,7 +171,6 @@ struct TerminalSessionView: View {
     }
 
     /// Send a tmux command through the control mode channel.
-    /// Writes are routed through the SSHService actor for thread safety.
     private func sendTmuxCommand(_ command: String) {
         let fullCommand = command + "\n"
         Task {

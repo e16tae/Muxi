@@ -21,6 +21,7 @@ struct ServerListView: View {
                 } label: {
                     ServerRowView(server: server)
                 }
+                .listRowBackground(MuxiTokens.Colors.surfaceDefault)
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button(role: .destructive) {
                         deleteServer(server)
@@ -32,10 +33,12 @@ struct ServerListView: View {
                     } label: {
                         Label("Edit", systemImage: "pencil")
                     }
-                    .tint(.orange)
+                    .tint(MuxiTokens.Colors.warning)
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(MuxiTokens.Colors.surfaceBase)
         .navigationTitle("Servers")
         .toolbar {
             Button {

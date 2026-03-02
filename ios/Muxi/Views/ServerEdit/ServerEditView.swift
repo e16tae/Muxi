@@ -66,6 +66,8 @@ struct ServerEditView: View {
                 }
             }
             .onAppear { loadServer() }
+            .scrollContentBackground(.hidden)
+            .background(MuxiTokens.Colors.surfaceBase)
         }
     }
 

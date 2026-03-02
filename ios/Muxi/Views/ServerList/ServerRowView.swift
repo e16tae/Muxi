@@ -4,13 +4,14 @@ struct ServerRowView: View {
     let server: Server
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: MuxiTokens.Spacing.xs) {
             Text(server.name)
-                .font(.headline)
+                .font(MuxiTokens.Typography.title)
+                .foregroundStyle(MuxiTokens.Colors.textPrimary)
             Text("\(server.username)@\(server.host):\(server.port)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(MuxiTokens.Typography.caption)
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, MuxiTokens.Spacing.xs)
     }
 }

@@ -56,7 +56,7 @@ struct ExtendedKeyboardView: View {
                         .foregroundStyle(MuxiTokens.Colors.textPrimary)
                         .frame(minWidth: 36, minHeight: 32)
                         .background(MuxiTokens.Colors.accentMuted)
-                        .cornerRadius(MuxiTokens.Radius.sm)
+                        .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Dismiss Keyboard")
@@ -78,7 +78,7 @@ struct ExtendedKeyboardView: View {
                 .foregroundStyle(MuxiTokens.Colors.textPrimary)
                 .frame(minWidth: 36, minHeight: 32)
                 .background(MuxiTokens.Colors.accentMuted)
-                .cornerRadius(MuxiTokens.Radius.sm)
+                .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
         }
         .buttonStyle(.plain)
     }
@@ -93,7 +93,7 @@ struct ExtendedKeyboardView: View {
                 .foregroundStyle(active ? theme.background.color : MuxiTokens.Colors.textPrimary)
                 .frame(minWidth: 36, minHeight: 32)
                 .background(active ? MuxiTokens.Colors.accentDefault : MuxiTokens.Colors.accentMuted)
-                .cornerRadius(MuxiTokens.Radius.sm)
+                .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
         }
         .buttonStyle(.plain)
     }

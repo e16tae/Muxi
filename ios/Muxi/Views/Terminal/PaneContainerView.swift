@@ -149,7 +149,7 @@ struct PaneContainerView: View {
                                     ? MuxiTokens.Colors.accentSubtle
                                     : Color.clear
                             )
-                            .cornerRadius(MuxiTokens.Radius.sm)
+                            .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
                     }
                     .buttonStyle(.plain)
                 }

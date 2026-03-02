@@ -113,7 +113,7 @@ struct TmuxInstallGuideView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: MuxiTokens.Spacing.xl) {
                     headerSection
                     installSection
                     verifySection
@@ -136,7 +136,7 @@ struct TmuxInstallGuideView: View {
 
     @ViewBuilder
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MuxiTokens.Spacing.sm) {
             Label {
                 switch reason {
                 case .notInstalled:
@@ -146,19 +146,19 @@ struct TmuxInstallGuideView: View {
                 }
             } icon: {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(MuxiTokens.Colors.warning)
             }
             .font(.headline)
 
             Text(descriptionText)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
         }
     }
 
     @ViewBuilder
     private var installSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MuxiTokens.Spacing.md) {
             Text("Install or Update tmux")
                 .font(.subheadline.weight(.semibold))
 
@@ -171,7 +171,7 @@ struct TmuxInstallGuideView: View {
 
     @ViewBuilder
     private var verifySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MuxiTokens.Spacing.md) {
             Text("Verify Installation")
                 .font(.subheadline.weight(.semibold))
 
@@ -179,7 +179,7 @@ struct TmuxInstallGuideView: View {
 
             Text("Muxi requires tmux \(Self.minimumVersion) or later.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
         }
     }
 
@@ -196,18 +196,18 @@ struct TmuxInstallGuideView: View {
 
     @ViewBuilder
     private func commandBlock(label: String, command: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: MuxiTokens.Spacing.xs) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
 
             Text(command)
                 .font(.system(.caption, design: .monospaced))
-                .padding(10)
+                .padding(MuxiTokens.Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color(.systemGray6))
+                    RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm, style: .continuous)
+                        .fill(MuxiTokens.Colors.surfaceRaised)
                 )
                 .textSelection(.enabled)
         }
@@ -218,7 +218,7 @@ struct TmuxInstallGuideView: View {
 
 #Preview("Reconnecting Overlay") {
     ZStack {
-        Color(.systemBackground)
+        MuxiTokens.Colors.surfaceDefault
             .ignoresSafeArea()
 
         Text("Terminal Content Behind Overlay")

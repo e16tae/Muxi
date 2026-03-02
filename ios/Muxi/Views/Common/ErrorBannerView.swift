@@ -67,7 +67,7 @@ struct ErrorBannerView: View {
                 // Message text
                 Text(message)
                     .font(.subheadline)
-                    .foregroundStyle(.primary)
+                    .foregroundStyle(MuxiTokens.Colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -78,7 +78,7 @@ struct ErrorBannerView: View {
                     } label: {
                         Image(systemName: "xmark")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(MuxiTokens.Colors.textSecondary)
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Dismiss")
@@ -124,6 +124,7 @@ struct ErrorBannerModifier: ViewModifier {
     let style: BannerStyle
     var onDismiss: (() -> Void)?
     var onRetry: (() -> Void)?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     func body(content: Content) -> some View {
         content.overlay(alignment: .top) {
@@ -132,7 +133,7 @@ struct ErrorBannerModifier: ViewModifier {
                     message: message,
                     style: style,
                     onDismiss: {
-                        withAnimation(MuxiTokens.Motion.subtle) {
+                        withAnimation(MuxiTokens.Motion.resolved(reduceMotion: reduceMotion).subtle) {
                             isPresented = false
                         }
                         onDismiss?()
@@ -142,7 +143,7 @@ struct ErrorBannerModifier: ViewModifier {
                 .padding(.top, MuxiTokens.Spacing.sm)
             }
         }
-        .animation(MuxiTokens.Motion.subtle, value: isPresented)
+        .muxiAnimation(\.subtle, value: isPresented)
     }
 }
 

@@ -15,7 +15,7 @@ struct ThemeSettingsView: View {
                     VStack(alignment: .leading, spacing: MuxiTokens.Spacing.xs) {
                         Text(theme.name)
                             .font(.body)
-                            .foregroundStyle(.primary)
+                            .foregroundStyle(MuxiTokens.Colors.textPrimary)
 
                         // Color preview: show first 8 ANSI colors as swatches.
                         HStack(spacing: 2) {

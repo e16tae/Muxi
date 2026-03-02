@@ -94,6 +94,30 @@ enum MuxiTokens {
     }
 }
 
+// MARK: - Reduce Motion View Modifier
+
+struct MuxiAnimationModifier<V: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let animation: KeyPath<MuxiTokens.ResolvedMotion, Animation>
+    let value: V
+
+    func body(content: Content) -> some View {
+        content.animation(
+            MuxiTokens.Motion.resolved(reduceMotion: reduceMotion)[keyPath: animation],
+            value: value
+        )
+    }
+}
+
+extension View {
+    func muxiAnimation(
+        _ animation: KeyPath<MuxiTokens.ResolvedMotion, Animation>,
+        value: some Equatable
+    ) -> some View {
+        modifier(MuxiAnimationModifier(animation: animation, value: value))
+    }
+}
+
 // MARK: - Color Helpers
 
 extension Color {

@@ -37,23 +37,23 @@ struct ReconnectingOverlay: View {
     var body: some View {
         ZStack {
             // Semi-transparent backdrop
-            Color.black.opacity(0.5)
+            MuxiTokens.Colors.surfaceBase.opacity(0.7)
                 .ignoresSafeArea()
 
             // Centered card
-            VStack(spacing: 20) {
+            VStack(spacing: MuxiTokens.Spacing.xl) {
                 ProgressView()
                     .progressViewStyle(.circular)
                     .controlSize(.large)
-                    .tint(.white)
+                    .tint(MuxiTokens.Colors.textPrimary)
 
                 Text("Reconnecting...")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(MuxiTokens.Colors.textPrimary)
 
                 Text(attemptText)
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(MuxiTokens.Colors.textSecondary)
 
                 if let onCancel {
                     Button {
@@ -61,27 +61,26 @@ struct ReconnectingOverlay: View {
                     } label: {
                         Text("Cancel")
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 8)
+                            .foregroundStyle(MuxiTokens.Colors.textPrimary)
+                            .padding(.horizontal, MuxiTokens.Spacing.xl)
+                            .padding(.vertical, MuxiTokens.Spacing.sm)
                             .background(
                                 Capsule()
-                                    .fill(.white.opacity(0.15))
+                                    .fill(MuxiTokens.Colors.accentSubtle)
                             )
                             .overlay(
                                 Capsule()
-                                    .strokeBorder(.white.opacity(0.3), lineWidth: 1)
+                                    .strokeBorder(MuxiTokens.Colors.borderAccent, lineWidth: 1)
                             )
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Cancel reconnection")
                 }
             }
-            .padding(32)
+            .padding(MuxiTokens.Spacing.xxl)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.regularMaterial)
-                    .environment(\.colorScheme, .dark)
+                RoundedRectangle(cornerRadius: MuxiTokens.Radius.lg, style: .continuous)
+                    .fill(MuxiTokens.Colors.surfaceElevated)
             )
         }
         .transition(.opacity)

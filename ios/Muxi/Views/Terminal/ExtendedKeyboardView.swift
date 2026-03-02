@@ -19,7 +19,7 @@ struct ExtendedKeyboardView: View {
     // MARK: - Body
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: MuxiTokens.Spacing.sm) {
             // Immediate keys
             keyButton("Esc") { send(key: .escape) }
             keyButton("Tab") { send(key: .tab) }

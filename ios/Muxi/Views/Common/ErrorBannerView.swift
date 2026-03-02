@@ -57,7 +57,7 @@ struct ErrorBannerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MuxiTokens.Spacing.sm) {
-            HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: MuxiTokens.Spacing.md) {
                 // Leading icon
                 Image(systemName: style.icon)
                     .foregroundStyle(style.color)

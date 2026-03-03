@@ -48,9 +48,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: Muxi/Muxi.entitlements
     info:
       path: Muxi/Info.plist
-      properties:
-        UIAppFonts:
-          - Fonts/SarasaMonoSC-NF-Regular.ttf
+      properties: {}
 
   MuxiTests:
     type: bundle.unit-test

@@ -7,25 +7,26 @@ struct SessionRowView: View {
 
     var body: some View {
         HStack {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: MuxiTokens.Spacing.xs) {
                 Text(session.name)
-                    .font(.headline)
-                HStack(spacing: 8) {
+                    .font(MuxiTokens.Typography.title)
+                    .foregroundStyle(MuxiTokens.Colors.textPrimary)
+                HStack(spacing: MuxiTokens.Spacing.sm) {
                     Text(session.id)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(MuxiTokens.Typography.caption)
+                        .foregroundStyle(MuxiTokens.Colors.textSecondary)
                     if !session.windows.isEmpty {
                         Text("\(session.windows.count) window\(session.windows.count == 1 ? "" : "s")")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .font(MuxiTokens.Typography.caption)
+                            .foregroundStyle(MuxiTokens.Colors.textSecondary)
                     }
                 }
             }
             Spacer()
             Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
+                .font(MuxiTokens.Typography.caption)
+                .foregroundStyle(MuxiTokens.Colors.textTertiary)
         }
-        .padding(.vertical, 4)
+        .padding(.vertical, MuxiTokens.Spacing.xs)
     }
 }

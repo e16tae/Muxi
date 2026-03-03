@@ -133,7 +133,7 @@ struct PaneContainerView: View {
     @ViewBuilder
     private var paneTabBar: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
+            HStack(spacing: MuxiTokens.Spacing.md) {
                 ForEach(panes.indices, id: \.self) { index in
                     Button {
                         selectedPaneIndex = index
@@ -142,14 +142,14 @@ struct PaneContainerView: View {
                     } label: {
                         Text("Pane \(index + 1)")
                             .font(.caption)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
+                            .padding(.horizontal, MuxiTokens.Spacing.md)
+                            .padding(.vertical, MuxiTokens.Spacing.xs)
                             .background(
                                 index == selectedPaneIndex
-                                    ? Color.accentColor.opacity(0.3)
+                                    ? MuxiTokens.Colors.accentSubtle
                                     : Color.clear
                             )
-                            .cornerRadius(8)
+                            .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
                     }
                     .buttonStyle(.plain)
                 }
@@ -157,7 +157,7 @@ struct PaneContainerView: View {
             .padding(.horizontal)
         }
         .frame(height: 36)
-        .background(Color(UIColor.systemBackground))
+        .background(MuxiTokens.Colors.surfaceRaised)
     }
 
     // MARK: - Regular (iPad) Layout
@@ -181,7 +181,9 @@ struct PaneContainerView: View {
                             .overlay(
                                 RoundedRectangle(cornerRadius: 0)
                                     .stroke(
-                                        Color.accentColor.opacity(activePaneId == pane.id ? 0.5 : 0),
+                                        activePaneId == pane.id
+                                            ? MuxiTokens.Colors.borderAccent
+                                            : Color.clear,
                                         lineWidth: 2
                                     )
                             )
@@ -205,7 +207,7 @@ struct PaneContainerView: View {
     /// Draw 1pt separator lines along the edges where two panes meet.
     @ViewBuilder
     private func separatorLines(frames: [PaneLayout.Frame], containerSize: CGSize) -> some View {
-        let separatorColor = theme.foreground.color.opacity(0.2)
+        let separatorColor = MuxiTokens.Colors.borderDefault
 
         ForEach(0..<frames.count, id: \.self) { i in
             let frame = frames[i]

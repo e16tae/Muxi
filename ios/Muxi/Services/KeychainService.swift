@@ -4,11 +4,24 @@ import Security
 // MARK: - KeychainError
 
 /// Errors that can occur when interacting with the iOS Keychain.
-enum KeychainError: Error {
+enum KeychainError: Error, LocalizedError {
     case itemNotFound
     case duplicateItem
     case unexpectedStatus(OSStatus)
     case dataConversionFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .itemNotFound:
+            return "No credentials found in Keychain"
+        case .duplicateItem:
+            return "Duplicate Keychain item"
+        case .unexpectedStatus(let status):
+            return "Keychain error (OSStatus \(status))"
+        case .dataConversionFailed:
+            return "Failed to decode Keychain data"
+        }
+    }
 }
 
 // MARK: - KeychainService

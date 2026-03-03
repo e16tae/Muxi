@@ -37,23 +37,23 @@ struct ReconnectingOverlay: View {
     var body: some View {
         ZStack {
             // Semi-transparent backdrop
-            Color.black.opacity(0.5)
+            MuxiTokens.Colors.surfaceBase.opacity(0.7)
                 .ignoresSafeArea()
 
             // Centered card
-            VStack(spacing: 20) {
+            VStack(spacing: MuxiTokens.Spacing.xl) {
                 ProgressView()
                     .progressViewStyle(.circular)
                     .controlSize(.large)
-                    .tint(.white)
+                    .tint(MuxiTokens.Colors.textPrimary)
 
                 Text("Reconnecting...")
                     .font(.headline)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(MuxiTokens.Colors.textPrimary)
 
                 Text(attemptText)
                     .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.7))
+                    .foregroundStyle(MuxiTokens.Colors.textSecondary)
 
                 if let onCancel {
                     Button {
@@ -61,27 +61,26 @@ struct ReconnectingOverlay: View {
                     } label: {
                         Text("Cancel")
                             .font(.subheadline.weight(.medium))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 24)
-                            .padding(.vertical, 8)
+                            .foregroundStyle(MuxiTokens.Colors.textPrimary)
+                            .padding(.horizontal, MuxiTokens.Spacing.xl)
+                            .padding(.vertical, MuxiTokens.Spacing.sm)
                             .background(
                                 Capsule()
-                                    .fill(.white.opacity(0.15))
+                                    .fill(MuxiTokens.Colors.accentSubtle)
                             )
                             .overlay(
                                 Capsule()
-                                    .strokeBorder(.white.opacity(0.3), lineWidth: 1)
+                                    .strokeBorder(MuxiTokens.Colors.borderAccent, lineWidth: 1)
                             )
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("Cancel reconnection")
                 }
             }
-            .padding(32)
+            .padding(MuxiTokens.Spacing.xxl)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.regularMaterial)
-                    .environment(\.colorScheme, .dark)
+                RoundedRectangle(cornerRadius: MuxiTokens.Radius.lg, style: .continuous)
+                    .fill(MuxiTokens.Colors.surfaceElevated)
             )
         }
         .transition(.opacity)
@@ -114,7 +113,7 @@ struct TmuxInstallGuideView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: MuxiTokens.Spacing.xl) {
                     headerSection
                     installSection
                     verifySection
@@ -137,7 +136,7 @@ struct TmuxInstallGuideView: View {
 
     @ViewBuilder
     private var headerSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: MuxiTokens.Spacing.sm) {
             Label {
                 switch reason {
                 case .notInstalled:
@@ -147,19 +146,19 @@ struct TmuxInstallGuideView: View {
                 }
             } icon: {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(MuxiTokens.Colors.warning)
             }
             .font(.headline)
 
             Text(descriptionText)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
         }
     }
 
     @ViewBuilder
     private var installSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MuxiTokens.Spacing.md) {
             Text("Install or Update tmux")
                 .font(.subheadline.weight(.semibold))
 
@@ -172,7 +171,7 @@ struct TmuxInstallGuideView: View {
 
     @ViewBuilder
     private var verifySection: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: MuxiTokens.Spacing.md) {
             Text("Verify Installation")
                 .font(.subheadline.weight(.semibold))
 
@@ -180,7 +179,7 @@ struct TmuxInstallGuideView: View {
 
             Text("Muxi requires tmux \(Self.minimumVersion) or later.")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
         }
     }
 
@@ -197,18 +196,18 @@ struct TmuxInstallGuideView: View {
 
     @ViewBuilder
     private func commandBlock(label: String, command: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: MuxiTokens.Spacing.xs) {
             Text(label)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
 
             Text(command)
                 .font(.system(.caption, design: .monospaced))
-                .padding(10)
+                .padding(MuxiTokens.Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color(.systemGray6))
+                    RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm, style: .continuous)
+                        .fill(MuxiTokens.Colors.surfaceRaised)
                 )
                 .textSelection(.enabled)
         }
@@ -219,7 +218,7 @@ struct TmuxInstallGuideView: View {
 
 #Preview("Reconnecting Overlay") {
     ZStack {
-        Color(.systemBackground)
+        MuxiTokens.Colors.surfaceDefault
             .ignoresSafeArea()
 
         Text("Terminal Content Behind Overlay")

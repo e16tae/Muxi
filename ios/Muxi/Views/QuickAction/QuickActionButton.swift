@@ -20,10 +20,9 @@ struct QuickActionButton: View {
         } label: {
             Image(systemName: "bolt.fill")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(MuxiTokens.Colors.textPrimary)
                 .frame(width: 52, height: 52)
-                .background(Circle().fill(.tint))
-                .shadow(color: .black.opacity(0.25), radius: 4, x: 0, y: 2)
+                .background(Circle().fill(MuxiTokens.Colors.accentDefault))
         }
         .accessibilityLabel("Quick Actions")
         .sheet(isPresented: $showingActions) {

@@ -19,7 +19,7 @@ struct ExtendedKeyboardView: View {
     // MARK: - Body
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: MuxiTokens.Spacing.sm) {
             // Immediate keys
             keyButton("Esc") { send(key: .escape) }
             keyButton("Tab") { send(key: .tab) }
@@ -35,7 +35,7 @@ struct ExtendedKeyboardView: View {
 
             Divider()
                 .frame(height: 24)
-                .background(theme.foreground.color.opacity(0.3))
+                .background(MuxiTokens.Colors.borderDefault)
 
             // Arrow keys
             keyButton("\u{2190}") { send(key: .arrowLeft) }   // left arrow
@@ -52,18 +52,18 @@ struct ExtendedKeyboardView: View {
 
                 Button { onDismissKeyboard?() } label: {
                     Image(systemName: "keyboard.chevron.compact.down")
-                        .font(.system(size: 14, weight: .medium))
-                        .foregroundStyle(theme.foreground.color)
+                        .font(MuxiTokens.Typography.label)
+                        .foregroundStyle(MuxiTokens.Colors.textPrimary)
                         .frame(minWidth: 36, minHeight: 32)
-                        .background(theme.foreground.color.opacity(0.1))
-                        .cornerRadius(6)
+                        .background(MuxiTokens.Colors.accentMuted)
+                        .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel("Dismiss Keyboard")
             }
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
+        .padding(.horizontal, MuxiTokens.Spacing.sm)
+        .padding(.vertical, MuxiTokens.Spacing.xs)
         .frame(height: 44)
         .background(theme.background.color)
     }
@@ -74,11 +74,11 @@ struct ExtendedKeyboardView: View {
     private func keyButton(_ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
-                .foregroundStyle(theme.foreground.color)
+                .font(MuxiTokens.Typography.label.monospaced())
+                .foregroundStyle(MuxiTokens.Colors.textPrimary)
                 .frame(minWidth: 36, minHeight: 32)
-                .background(theme.foreground.color.opacity(0.1))
-                .cornerRadius(6)
+                .background(MuxiTokens.Colors.accentMuted)
+                .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
         }
         .buttonStyle(.plain)
     }
@@ -89,11 +89,11 @@ struct ExtendedKeyboardView: View {
     private func modifierButton(_ label: String, active: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(label)
-                .font(.system(size: 14, weight: .medium, design: .monospaced))
-                .foregroundStyle(active ? theme.background.color : theme.foreground.color)
+                .font(MuxiTokens.Typography.label.monospaced())
+                .foregroundStyle(active ? theme.background.color : MuxiTokens.Colors.textPrimary)
                 .frame(minWidth: 36, minHeight: 32)
-                .background(active ? theme.foreground.color : theme.foreground.color.opacity(0.1))
-                .cornerRadius(6)
+                .background(active ? MuxiTokens.Colors.accentDefault : MuxiTokens.Colors.accentMuted)
+                .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
         }
         .buttonStyle(.plain)
     }

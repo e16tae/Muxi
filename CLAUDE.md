@@ -10,8 +10,7 @@ cd ios && xcodegen generate
 
 # Run iOS app + unit tests
 xcodebuild test -project ios/Muxi.xcodeproj -scheme Muxi \
-  -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.2' \
-  CODE_SIGNING_ALLOWED=NO
+  -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.2'
 
 # Run core C library tests (via SPM)
 swift test --package-path ios/MuxiCore

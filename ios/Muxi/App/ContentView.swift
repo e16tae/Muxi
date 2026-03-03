@@ -202,9 +202,9 @@ struct ContentView: View {
             // Try Keychain first; fall back to password prompt if not saved.
             do {
                 let keychain = KeychainService()
-                _ = try keychain.retrievePassword(account: server.id.uuidString)
+                let password = try keychain.retrievePassword(account: server.id.uuidString)
                 // Password found in Keychain, connect directly.
-                connectToServer(server)
+                connectToServer(server, password: password)
             } catch {
                 if case KeychainError.itemNotFound = error {
                     // No password in Keychain, prompt the user.
@@ -217,8 +217,25 @@ struct ContentView: View {
                     }
                 }
             }
-        case .key:
-            connectToServer(server)
+        case .key(let keyId):
+            // Verify SSH key exists before attempting connection.
+            do {
+                let keychain = KeychainService()
+                _ = try keychain.retrieveSSHKey(id: keyId)
+                connectToServer(server)
+            } catch {
+                if case KeychainError.itemNotFound = error {
+                    withAnimation {
+                        errorMessage = "SSH key not found. Import a key in Settings."
+                        showErrorBanner = true
+                    }
+                } else {
+                    withAnimation {
+                        errorMessage = "Keychain error: \(error.localizedDescription)"
+                        showErrorBanner = true
+                    }
+                }
+            }
         }
     }
 

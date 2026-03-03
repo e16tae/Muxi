@@ -1,5 +1,8 @@
 import Foundation
 import MuxiCore
+import os
+
+private let tmuxLog = Logger(subsystem: "com.muxi.app", category: "TmuxControl")
 
 /// Bridges the C tmux control-mode protocol parser to Swift.
 ///
@@ -14,8 +17,8 @@ final class TmuxControlService {
 
     // MARK: - Callbacks
 
-    /// Called when a pane produces output.
-    var onPaneOutput: ((_ paneId: String, _ data: String) -> Void)?
+    /// Called when a pane produces output (decoded from tmux octal escapes).
+    var onPaneOutput: ((_ paneId: String, _ data: Data) -> Void)?
 
     /// Called when a window's layout changes.
     var onLayoutChange: ((_ windowId: String, _ panes: [ParsedPane]) -> Void)?
@@ -35,6 +38,9 @@ final class TmuxControlService {
     /// Called when a tmux error is received.
     var onError: ((_ message: String) -> Void)?
 
+    /// Called when a command response block (%begin ... %end) completes.
+    var onCommandResponse: ((_ response: String) -> Void)?
+
     // MARK: - ParsedPane
 
     /// A single leaf pane extracted from a tmux layout string.
@@ -49,6 +55,21 @@ final class TmuxControlService {
     // MARK: - Line Accumulator
 
     private var lineBuffer = Data()
+
+    /// Whether we have entered tmux control mode (seen the DCS prefix).
+    /// Lines before this point are shell output and should be ignored.
+    private var inControlMode = false
+
+    /// Whether we are inside a %begin...%end response block.
+    private var inResponseBlock = false
+
+    /// Accumulated lines inside the current %begin...%end block.
+    private var responseLines: [String] = []
+
+    /// The DCS (Device Control String) prefix that tmux uses to start
+    /// control mode output: ESC P 1000p
+    private static let dcsPrefix = Data([0x1B, 0x50]) // ESC P
+    private static let dcsMarker = "1000p".data(using: .utf8)!
 
     /// Accumulate raw data from SSH, split on newlines, and dispatch
     /// complete lines to handleLine().
@@ -65,7 +86,27 @@ final class TmuxControlService {
                 lineData = lineData.dropLast()
             }
 
+            // Detect DCS prefix (ESC P ... 1000p) that marks tmux control
+            // mode start.  Strip everything up to and including the marker
+            // so the embedded %begin is properly parsed.
+            if !inControlMode {
+                if let line = String(data: lineData, encoding: .utf8),
+                   let range = line.range(of: "\u{1B}P1000p") {
+                    inControlMode = true
+                    let remainder = String(line[range.upperBound...])
+                    tmuxLog.info("DCS detected — entering control mode")
+                    if !remainder.isEmpty {
+                        tmuxLog.info("feed line: \(remainder)")
+                        handleLine(remainder)
+                    }
+                    continue
+                }
+                // Not yet in control mode — skip shell output
+                continue
+            }
+
             if let line = String(data: lineData, encoding: .utf8) {
+                tmuxLog.info("feed line: \(line)")
                 handleLine(line)
             }
         }
@@ -74,6 +115,9 @@ final class TmuxControlService {
     /// Reset the line buffer (call on disconnect/reconnect).
     func resetLineBuffer() {
         lineBuffer = Data()
+        inControlMode = false
+        inResponseBlock = false
+        responseLines = []
     }
 
     // MARK: - Line Handling
@@ -81,6 +125,27 @@ final class TmuxControlService {
     /// Parse a single line from tmux control mode output and dispatch
     /// to the appropriate callback.
     func handleLine(_ line: String) {
+        // If we are inside a %begin...%end response block, accumulate
+        // non-command lines. %end/%error lines end the block.
+        if inResponseBlock {
+            if line.hasPrefix("%end") {
+                let response = responseLines.joined(separator: "\n")
+                responseLines = []
+                inResponseBlock = false
+                tmuxLog.info("Command response: \(response.count) chars")
+                onCommandResponse?(response)
+                return
+            } else if line.hasPrefix("%error") {
+                responseLines = []
+                inResponseBlock = false
+                // Fall through to parse the %error normally
+            } else {
+                // Data line inside %begin...%end block
+                responseLines.append(line)
+                return
+            }
+        }
+
         // The C parser's pointer fields (output_data, layout, etc.) point
         // directly into the input buffer.  We must keep the C string alive
         // while we read those fields, so everything lives inside withCString.
@@ -88,24 +153,36 @@ final class TmuxControlService {
             var msg = TmuxMessage()
             let type = tmux_parse_line(cLine, &msg)
 
+            tmuxLog.info("parsed type=\(type) for line: \(line.prefix(80))")
+
             switch type {
             case TMUX_MSG_OUTPUT:
                 let paneId = extractString(from: &msg.pane_id, capacity: Int(TMUX_ID_MAX))
-                let data: String
-                if let ptr = msg.output_data {
-                    data = String(cString: ptr)
+                let decoded: Data
+                if let ptr = msg.output_data, msg.output_len > 0 {
+                    let escaped = String(cString: ptr)
+                    decoded = Self.decodeTmuxOutput(escaped)
                 } else {
-                    data = ""
+                    decoded = Data()
                 }
-                onPaneOutput?(paneId, data)
+                tmuxLog.info("Output: pane=\(paneId) len=\(decoded.count)")
+                onPaneOutput?(paneId, decoded)
 
             case TMUX_MSG_LAYOUT_CHANGE:
                 let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
                 var layoutStr = ""
-                if let ptr = msg.layout {
-                    layoutStr = String(cString: ptr)
+                if let ptr = msg.layout, msg.layout_len > 0 {
+                    // Use layout_len to extract only the first layout token
+                    // (tmux sends: <layout> <visible_layout> [*])
+                    layoutStr = String(
+                        bytes: UnsafeBufferPointer(start: ptr, count: Int(msg.layout_len))
+                            .map { UInt8(bitPattern: $0) },
+                        encoding: .utf8
+                    ) ?? ""
                 }
+                tmuxLog.info("Layout change: window=\(windowId) layout=\(layoutStr)")
                 let panes = parseLayout(layoutStr)
+                tmuxLog.info("Parsed \(panes.count) panes from layout")
                 onLayoutChange?(windowId, panes)
 
             case TMUX_MSG_WINDOW_ADD:
@@ -132,6 +209,10 @@ final class TmuxControlService {
                     errorMsg = "Unknown tmux error"
                 }
                 onError?(errorMsg)
+
+            case TMUX_MSG_BEGIN:
+                inResponseBlock = true
+                responseLines = []
 
             default:
                 break
@@ -208,6 +289,40 @@ final class TmuxControlService {
     }
 
     // MARK: - Private Helpers
+
+    /// Decode tmux control-mode octal escapes in `%output` data.
+    ///
+    /// tmux encodes non-printable bytes (< 0x20) and backslash as `\` followed
+    /// by exactly 3 octal digits (e.g. `\033` for ESC, `\134` for `\`).
+    /// All other characters are passed through literally.
+    static func decodeTmuxOutput(_ escaped: String) -> Data {
+        let utf8 = Array(escaped.utf8)
+        var result = Data()
+        result.reserveCapacity(utf8.count)
+
+        var i = 0
+        while i < utf8.count {
+            if utf8[i] == UInt8(ascii: "\\"), i + 3 < utf8.count {
+                let d1 = utf8[i + 1]
+                let d2 = utf8[i + 2]
+                let d3 = utf8[i + 3]
+                if d1 >= UInt8(ascii: "0"), d1 <= UInt8(ascii: "7"),
+                   d2 >= UInt8(ascii: "0"), d2 <= UInt8(ascii: "7"),
+                   d3 >= UInt8(ascii: "0"), d3 <= UInt8(ascii: "7") {
+                    let value = ((d1 - UInt8(ascii: "0")) << 6)
+                              | ((d2 - UInt8(ascii: "0")) << 3)
+                              | (d3 - UInt8(ascii: "0"))
+                    result.append(value)
+                    i += 4
+                    continue
+                }
+            }
+            result.append(utf8[i])
+            i += 1
+        }
+
+        return result
+    }
 
     /// Convert a C fixed-size char array (imported as a tuple) to a Swift String.
     private func extractString<T>(from tuple: inout T, capacity: Int) -> String {

@@ -2,6 +2,8 @@ import Foundation
 import CLibSSH2
 import os
 
+private let sshLog = Logger(subsystem: "com.muxi.app", category: "SSH")
+
 /// libssh2 error code for EAGAIN (would-block in non-blocking mode)
 private let kLibSSH2ErrorEAGAIN: Int = -37
 
@@ -252,9 +254,11 @@ actor SSHService: SSHServiceProtocol {
         }
 
         updateState(.connecting)
+        sshLog.info("Connecting to \(host):\(port) as \(username)")
 
         do {
             guard libssh2Initialized else {
+                sshLog.error("libssh2 not initialized")
                 throw SSHError.connectionFailed("libssh2 initialization failed")
             }
 
@@ -347,7 +351,9 @@ actor SSHService: SSHServiceProtocol {
             try authenticate(session: sess, username: username, auth: auth)
 
             updateState(.connected)
+            sshLog.info("SSH connected successfully")
         } catch {
+            sshLog.error("SSH connection error: \(error)")
             updateState(.error(error.localizedDescription))
             throw error
         }

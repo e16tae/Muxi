@@ -64,6 +64,11 @@ final class ConnectionManager {
     /// again when re-establishing a dropped connection.
     private var cachedAuth: SSHAuth?
 
+    /// Queue of pane IDs waiting for ``capture-pane`` response.
+    /// Each ``capture-pane -e -p -t %<id>`` triggers a %begin/%end block;
+    /// responses are matched to panes in FIFO order.
+    private var capturePaneQueue: [String] = []
+
     // MARK: - Reconnect Configuration
 
     /// Maximum number of reconnection attempts before giving up.
@@ -103,10 +108,12 @@ final class ConnectionManager {
         guard state == .disconnected else { return sessions }
         state = .connecting
         currentServer = server
+        logger.info("Connecting to \(server.host):\(server.port) user=\(server.username)")
 
         do {
             let auth = try resolveAuth(for: server, password: password)
             cachedAuth = auth
+            logger.info("Auth resolved, starting SSH connect...")
 
             try await sshService.connect(
                 host: server.host,
@@ -114,15 +121,18 @@ final class ConnectionManager {
                 username: server.username,
                 auth: auth
             )
+            logger.info("SSH connected, querying tmux sessions...")
 
             // Query tmux sessions via a formatted list-sessions command.
             let output = try await sshService.execCommand(
                 "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}'"
             )
             sessions = TmuxControlService.parseFormattedSessionList(output)
+            logger.info("Found \(self.sessions.count) tmux sessions")
             state = .sessionList
             return sessions
         } catch {
+            logger.error("Connection failed: \(error)")
             state = .disconnected
             currentServer = nil
             cachedAuth = nil
@@ -145,6 +155,8 @@ final class ConnectionManager {
         currentServer = nil
         sessions = []
         cachedAuth = nil
+        capturePaneQueue = []
+        lastSentSize = (0, 0)
     }
 
     // MARK: - Session Management
@@ -155,25 +167,39 @@ final class ConnectionManager {
     /// `tmux -CC attach -t <name>` and pipes output through
     /// ``TmuxControlService/feed(_:)``.
     func attachSession(_ session: TmuxSession) async throws {
-        guard state == .sessionList else { return }
+        guard state == .sessionList else {
+            logger.warning("attachSession called but state is not .sessionList (state=\(String(describing: self.state)))")
+            return
+        }
+        logger.info("Attaching to session: \(session.name)")
 
         // Wire tmux callbacks before starting the shell.
         wireCallbacks()
 
         // Start an interactive shell, feeding data to the tmux parser.
+        logger.info("Starting SSH shell...")
         let channel = try await sshService.startShell(onData: { [weak self] data in
             Task { @MainActor in
                 self?.tmuxService.feed(data)
             }
         })
+        logger.info("Shell started, sending tmux -CC attach command...")
 
         activeChannel = channel
 
         // Send tmux -CC attach command through the shell (actor-routed).
         let command = "tmux -CC attach -t \(session.name.shellEscaped())\n"
         try await sshService.writeToChannel(Data(command.utf8))
+        logger.info("tmux attach command sent, transitioning to .attached")
 
         state = .attached(sessionName: session.name)
+
+        // Send a small initial size to trigger %layout-change.
+        // The TerminalSessionView will send the correct size once
+        // it knows its actual dimensions via GeometryReader.
+        let refreshCmd = "refresh-client -C 80,24\n"
+        try await sshService.writeToChannel(Data(refreshCmd.utf8))
+        logger.info("Sent initial refresh-client, awaiting view-based resize")
 
         // Monitor SSH connection — trigger reconnect if the read loop
         // ends without a tmux %exit (e.g. network drop).
@@ -204,6 +230,25 @@ final class ConnectionManager {
         paneBuffers = [:]
         currentPanes = []
         state = .sessionList
+    }
+
+    // MARK: - Terminal Resize
+
+    /// The last terminal size sent to tmux, to avoid redundant commands.
+    private var lastSentSize: (cols: Int, rows: Int) = (0, 0)
+
+    /// Notify tmux of a new client size. Tmux will re-layout panes and
+    /// TUI applications will receive SIGWINCH to adapt.
+    func resizeTerminal(cols: Int, rows: Int) {
+        guard case .attached = state else { return }
+        guard cols > 0, rows > 0 else { return }
+        guard (cols, rows) != lastSentSize else { return }
+        lastSentSize = (cols, rows)
+        logger.info("Resizing terminal to \(cols)x\(rows)")
+        let cmd = "refresh-client -C \(cols),\(rows)\n"
+        Task {
+            try? await sshService.writeToChannel(Data(cmd.utf8))
+        }
     }
 
     // MARK: - tmux Session CRUD
@@ -324,19 +369,21 @@ final class ConnectionManager {
     /// ``TerminalBuffer`` instances.
     private func wireCallbacks() {
         tmuxService.onPaneOutput = { [weak self] paneId, data in
-            self?.paneBuffers[paneId]?.feed(data)
+            self?.paneBuffers[paneId]?.feedData(data)
         }
 
         tmuxService.onLayoutChange = { [weak self] windowId, panes in
             guard let self else { return }
             self.currentPanes = panes
             // Create TerminalBuffer for any new panes.
+            var newPaneIds: [String] = []
             for pane in panes {
                 let paneId = "%\(pane.paneId)"
                 if self.paneBuffers[paneId] == nil {
                     self.paneBuffers[paneId] = TerminalBuffer(
                         cols: pane.width, rows: pane.height
                     )
+                    newPaneIds.append(paneId)
                 } else {
                     // Resize existing buffer if dimensions changed.
                     self.paneBuffers[paneId]?.resize(
@@ -348,6 +395,31 @@ final class ConnectionManager {
             let activePaneIds = Set(panes.map { "%\($0.paneId)" })
             for key in self.paneBuffers.keys where !activePaneIds.contains(key) {
                 self.paneBuffers.removeValue(forKey: key)
+            }
+            // Request initial screen content for newly created panes.
+            // capture-pane -e includes ANSI escapes, -p prints to stdout
+            // which tmux returns inside a %begin/%end block.
+            for paneId in newPaneIds {
+                self.capturePaneQueue.append(paneId)
+                let cmd = "capture-pane -e -p -t \(paneId.shellEscaped())\n"
+                Task {
+                    try? await self.sshServiceForWrites.writeToChannel(Data(cmd.utf8))
+                    self.logger.info("Sent capture-pane for \(paneId)")
+                }
+            }
+        }
+
+        tmuxService.onCommandResponse = { [weak self] response in
+            guard let self else { return }
+            guard let paneId = self.capturePaneQueue.first else {
+                self.logger.info("Command response with no pending capture-pane")
+                return
+            }
+            self.capturePaneQueue.removeFirst()
+            self.logger.info("capture-pane response for \(paneId): \(response.count) chars")
+            // Feed the captured content (with ANSI escapes) into the buffer.
+            if !response.isEmpty {
+                self.paneBuffers[paneId]?.feed(response)
             }
         }
 

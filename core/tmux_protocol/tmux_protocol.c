@@ -128,10 +128,13 @@ static int parse_layout_change(const char *rest, TmuxMessage *msg) {
     const char *id_end = skip_word(p);
     safe_copy(msg->window_id, TMUX_ID_MAX, p, (size_t)(id_end - p));
 
-    /* layout string -- point into original line */
+    /* layout string -- first space-delimited token only.
+     * tmux sends: %layout-change @id <layout> <visible_layout> [*]
+     * We only need the first layout token for parsing. */
     p = skip_space(id_end);
+    const char *layout_end = skip_word(p);
     msg->layout     = p;
-    msg->layout_len = strlen(p);
+    msg->layout_len = (size_t)(layout_end - p);
 
     return TMUX_MSG_LAYOUT_CHANGE;
 }

@@ -140,12 +140,12 @@ struct ContentView: View {
             Color.black.opacity(0.3)
                 .ignoresSafeArea()
 
-            VStack(spacing: 16) {
+            VStack(spacing: MuxiTokens.Spacing.lg) {
                 ProgressView()
                     .controlSize(.large)
                 Text("Connecting...")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
+                    .font(MuxiTokens.Typography.title)
+                    .foregroundStyle(MuxiTokens.Colors.textSecondary)
 
                 Button("Cancel") {
                     connectionManager.disconnect()
@@ -153,10 +153,10 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
             }
-            .padding(32)
+            .padding(MuxiTokens.Spacing.xxl)
             .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.regularMaterial)
+                RoundedRectangle(cornerRadius: MuxiTokens.Radius.lg, style: .continuous)
+                    .fill(MuxiTokens.Colors.surfaceElevated)
             )
         }
     }

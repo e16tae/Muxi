@@ -55,6 +55,12 @@ struct TerminalView: UIViewRepresentable {
             )
         }
 
+        // Redraw the Metal view whenever the buffer receives new data.
+        let coordinator = context.coordinator
+        buffer.onUpdate = { [weak coordinator] in
+            coordinator?.requestRedraw()
+        }
+
         // Trigger initial draw.
         mtkView.setNeedsDisplay()
         return mtkView
@@ -65,6 +71,14 @@ struct TerminalView: UIViewRepresentable {
         context.coordinator.channel = channel
         let bufferChanged = context.coordinator.renderer?.buffer !== buffer
         context.coordinator.renderer?.buffer = buffer
+
+        // Re-wire the update callback when the buffer instance changes.
+        if bufferChanged {
+            let coordinator = context.coordinator
+            buffer.onUpdate = { [weak coordinator] in
+                coordinator?.requestRedraw()
+            }
+        }
 
         // Update theme if changed (e.g. user selected a new theme in settings).
         if context.coordinator.currentTheme.id != theme.id {

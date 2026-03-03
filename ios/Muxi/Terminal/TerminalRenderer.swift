@@ -5,20 +5,15 @@ import os
 
 // MARK: - TerminalRenderer
 
-/// Metal-based terminal renderer.
+/// Metal-based terminal renderer with a **dynamic glyph atlas**.
 ///
 /// Renders a ``TerminalBuffer`` combined with a ``Theme`` as a grid of colored
-/// glyphs.  The renderer builds a **glyph atlas** texture once (for ASCII
-/// printable characters 32-126) and then, on every frame that requires a
-/// redraw, rebuilds a per-cell vertex buffer that pairs screen positions with
-/// UV coordinates, foreground colors, and background colors.
+/// glyphs.  The atlas starts with ASCII printable characters and grows
+/// on-demand when new characters (CJK, box-drawing, emoji, etc.) are
+/// encountered during ``rebuildVertices()``.
 ///
-/// Usage:
-/// ```swift
-/// let renderer = TerminalRenderer(device: mtlDevice, font: font, theme: theme)
-/// renderer.buffer = terminalBuffer
-/// mtkView.delegate = renderer
-/// ```
+/// Wide (CJK) characters occupy two cell widths in the atlas and are
+/// rendered across two columns in the grid.
 final class TerminalRenderer: NSObject, MTKViewDelegate {
 
     private let logger = Logger(subsystem: "com.muxi.app", category: "TerminalRenderer")
@@ -45,29 +40,40 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     /// UV coordinates in the glyph atlas for each cached character.
     private var glyphUVs: [Character: GlyphUV] = [:]
 
+    /// Persistent bitmap context for rendering new glyphs into the atlas.
+    private var atlasContext: CGContext?
+    /// CoreText font reference cached for glyph rendering.
+    private var ctFont: CTFont?
+    private var fontAscent: CGFloat = 0
+
+    /// Current atlas dimensions.
+    private var atlasWidth: Int = 2048
+    private var atlasHeight: Int = 2048
+
+    /// Next available position in the atlas for a new glyph.
+    private var atlasNextX: CGFloat = 0
+    private var atlasNextY: CGFloat = 0
+    /// Set to true when new glyphs are added and the texture needs updating.
+    private var atlasDirty = false
+
     /// UV rectangle within the glyph atlas texture.
     struct GlyphUV {
-        /// Top-left U coordinate.
         let u: Float
-        /// Top-left V coordinate.
         let v: Float
-        /// Bottom-right U coordinate.
         let uMax: Float
-        /// Bottom-right V coordinate.
         let vMax: Float
+        /// Number of cell widths this glyph occupies (1 or 2).
+        let cellSpan: Int
     }
 
     // MARK: - Vertex Data
 
-    /// Per-vertex data sent to the GPU.  Each cell is drawn as two triangles
-    /// (6 vertices) sharing position, UV, and color attributes.
-    ///
-    /// The layout **must** match the `CellVertex` struct in `Shaders.metal`.
+    /// Per-vertex data sent to the GPU.
     struct CellVertex {
-        var position: SIMD2<Float>   // screen position in pixels
-        var uv: SIMD2<Float>         // glyph atlas texture coordinate
-        var fgColor: SIMD4<Float>    // foreground RGBA
-        var bgColor: SIMD4<Float>    // background RGBA
+        var position: SIMD2<Float>
+        var uv: SIMD2<Float>
+        var fgColor: SIMD4<Float>
+        var bgColor: SIMD4<Float>
     }
 
     private var vertexBuffer: MTLBuffer?
@@ -75,22 +81,11 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
 
     // MARK: - Buffer Reference
 
-    /// The terminal buffer to render.  Set this and flip ``needsRedraw`` when
-    /// the buffer contents change.
     var buffer: TerminalBuffer?
-    /// Set to `true` to force a vertex-buffer rebuild on the next frame.
     var needsRedraw: Bool = true
 
     // MARK: - Init
 
-    /// Create a new Metal terminal renderer.
-    ///
-    /// - Parameters:
-    ///   - device: The `MTLDevice` to use for rendering.
-    ///   - font: A monospace `UIFont` used for glyph measurements and atlas
-    ///     generation.
-    ///   - theme: The terminal color theme.
-    /// - Returns: `nil` if the Metal command queue could not be created.
     init?(device: MTLDevice, font: UIFont, theme: Theme) {
         self.device = device
         guard let queue = device.makeCommandQueue() else { return nil }
@@ -101,22 +96,21 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
 
         measureCellSize()
         buildPipeline()
-        buildGlyphAtlas()
+        setupAtlas()
+        prerenderASCII()
     }
 
     // MARK: - Public Helpers
 
-    /// Reconfigure the renderer with a new font.  This remeasures cell
-    /// dimensions and rebuilds the glyph atlas.
     func updateFont(_ newFont: UIFont) {
         font = newFont
         measureCellSize()
-        buildGlyphAtlas()
+        glyphUVs.removeAll()
+        setupAtlas()
+        prerenderASCII()
         needsRedraw = true
     }
 
-    /// Reconfigure the renderer with a new theme.  Only triggers a vertex
-    /// rebuild (colors change, atlas does not).
     func updateTheme(_ newTheme: Theme) {
         theme = newTheme
         needsRedraw = true
@@ -124,31 +118,27 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
 
     // MARK: - Cell Measurement
 
-    /// Derive `cellWidth` and `cellHeight` from the current font metrics.
     private func measureCellSize() {
-        let ctFont = CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil)
-        // Use a reference glyph ("M") to determine the advance width.
-        var glyph = CTFontGetGlyphWithName(ctFont, "M" as CFString)
+        let ct = CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil)
+        var glyph = CTFontGetGlyphWithName(ct, "M" as CFString)
         var advance = CGSize.zero
-        CTFontGetAdvancesForGlyphs(ctFont, .horizontal, &glyph, &advance, 1)
+        CTFontGetAdvancesForGlyphs(ct, .horizontal, &glyph, &advance, 1)
         cellWidth = ceil(advance.width)
-        cellHeight = ceil(CTFontGetAscent(ctFont) + CTFontGetDescent(ctFont) + CTFontGetLeading(ctFont))
+        cellHeight = ceil(CTFontGetAscent(ct) + CTFontGetDescent(ct) + CTFontGetLeading(ct))
     }
 
-    // MARK: - Glyph Atlas Generation
+    // MARK: - Atlas Setup
 
-    /// Build a texture containing white-on-transparent renderings of ASCII
-    /// printable characters (32-126).  The resulting atlas is stored in
-    /// ``atlasTexture`` and per-glyph UV coordinates in ``glyphUVs``.
-    private func buildGlyphAtlas() {
+    /// Create the persistent bitmap context and Metal texture for the glyph atlas.
+    private func setupAtlas() {
         guard cellWidth > 0, cellHeight > 0 else { return }
 
-        let chars: [Character] = (32...126).map { Character(UnicodeScalar($0)) }
-        let atlasWidth = 1024
-        let atlasHeight = 1024
+        let ct = CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil)
+        ctFont = ct
+        fontAscent = CTFontGetAscent(ct)
 
         let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
-        guard let ctx = CGContext(
+        atlasContext = CGContext(
             data: nil,
             width: atlasWidth,
             height: atlasHeight,
@@ -156,70 +146,103 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
             bytesPerRow: atlasWidth * 4,
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return }
+        )
+        atlasContext?.clear(CGRect(x: 0, y: 0, width: atlasWidth, height: atlasHeight))
 
-        // Clear to transparent black.
-        ctx.clear(CGRect(x: 0, y: 0, width: atlasWidth, height: atlasHeight))
-
-        let ctFont = CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil)
-        let ascent = CTFontGetAscent(ctFont)
-
-        var x: CGFloat = 0
-        var y: CGFloat = 0 // row origin (top of glyph row in flipped coords)
+        atlasNextX = 0
+        atlasNextY = 0
         glyphUVs.removeAll()
 
-        for char in chars {
-            // Wrap to the next row if the current glyph would overflow.
-            if x + cellWidth > CGFloat(atlasWidth) {
-                x = 0
-                y += cellHeight
-            }
-            if y + cellHeight > CGFloat(atlasHeight) {
-                break // atlas full — should not happen for 95 ASCII glyphs
-            }
-
-            let str = String(char)
-            let attrString = CFAttributedStringCreateMutable(kCFAllocatorDefault, 0)!
-            CFAttributedStringReplaceString(attrString, CFRange(location: 0, length: 0), str as CFString)
-            let fullRange = CFRange(location: 0, length: CFAttributedStringGetLength(attrString))
-            CFAttributedStringSetAttribute(attrString, fullRange, kCTFontAttributeName, ctFont)
-
-            let line = CTLineCreateWithAttributedString(attrString)
-
-            // Core Graphics uses a bottom-left origin.  We lay out rows from
-            // the top of the bitmap, so `drawY` positions the baseline.
-            let drawY = CGFloat(atlasHeight) - y - cellHeight + (cellHeight - ascent)
-
-            ctx.saveGState()
-            ctx.setFillColor(UIColor.white.cgColor)
-            ctx.textPosition = CGPoint(x: x, y: drawY)
-            CTLineDraw(line, ctx)
-            ctx.restoreGState()
-
-            // UV coordinates (origin top-left in texture space for Metal).
-            let u    = Float(x) / Float(atlasWidth)
-            let v    = Float(y) / Float(atlasHeight)
-            let uMax = Float(x + cellWidth) / Float(atlasWidth)
-            let vMax = Float(y + cellHeight) / Float(atlasHeight)
-
-            glyphUVs[char] = GlyphUV(u: u, v: v, uMax: uMax, vMax: vMax)
-            x += cellWidth
-        }
-
-        // Transfer the rendered image to a Metal texture.
-        guard let image = ctx.makeImage(),
-              let dataProvider = image.dataProvider,
-              let cfData = dataProvider.data,
-              let bytes = CFDataGetBytePtr(cfData) else { return }
-
-        let textureDesc = MTLTextureDescriptor.texture2DDescriptor(
+        // Create the Metal texture.
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .rgba8Unorm,
             width: atlasWidth,
             height: atlasHeight,
             mipmapped: false
         )
-        textureDesc.usage = .shaderRead
-        atlasTexture = device.makeTexture(descriptor: textureDesc)
+        desc.usage = .shaderRead
+        atlasTexture = device.makeTexture(descriptor: desc)
+        atlasDirty = true
+    }
+
+    /// Pre-render ASCII printable characters (32-126) into the atlas.
+    private func prerenderASCII() {
+        for code in 32...126 {
+            let ch = Character(UnicodeScalar(code)!)
+            _ = ensureGlyph(ch)
+        }
+        flushAtlasToTexture()
+    }
+
+    // MARK: - Dynamic Glyph Rendering
+
+    /// Ensure a character has been rendered into the atlas. Returns its UV info.
+    @discardableResult
+    private func ensureGlyph(_ char: Character) -> GlyphUV {
+        if let existing = glyphUVs[char] { return existing }
+
+        guard let ctx = atlasContext, let ct = ctFont else {
+            let fallback = GlyphUV(u: 0, v: 0, uMax: 0, vMax: 0, cellSpan: 1)
+            return fallback
+        }
+
+        // Determine if this is a wide character (CJK, fullwidth, etc.)
+        let isWide = isWideCharacter(char)
+        let glyphWidth = isWide ? cellWidth * 2 : cellWidth
+        let cellSpan = isWide ? 2 : 1
+
+        // Wrap to the next row if the glyph doesn't fit.
+        if atlasNextX + glyphWidth > CGFloat(atlasWidth) {
+            atlasNextX = 0
+            atlasNextY += cellHeight
+        }
+        // Atlas full — cannot add more glyphs.
+        if atlasNextY + cellHeight > CGFloat(atlasHeight) {
+            logger.warning("Glyph atlas full, cannot add '\(String(char))'")
+            let fallback = glyphUVs[" "] ?? GlyphUV(u: 0, v: 0, uMax: 0, vMax: 0, cellSpan: 1)
+            return fallback
+        }
+
+        let str = String(char)
+        let attrString = CFAttributedStringCreateMutable(kCFAllocatorDefault, 0)!
+        CFAttributedStringReplaceString(attrString, CFRange(location: 0, length: 0), str as CFString)
+        let fullRange = CFRange(location: 0, length: CFAttributedStringGetLength(attrString))
+        CFAttributedStringSetAttribute(attrString, fullRange, kCTFontAttributeName, ct)
+
+        let line = CTLineCreateWithAttributedString(attrString)
+
+        // CG uses bottom-left origin. Position baseline correctly.
+        let drawY = CGFloat(atlasHeight) - atlasNextY - cellHeight + (cellHeight - fontAscent)
+
+        ctx.saveGState()
+        ctx.setFillColor(UIColor.white.cgColor)
+        ctx.textPosition = CGPoint(x: atlasNextX, y: drawY)
+        CTLineDraw(line, ctx)
+        ctx.restoreGState()
+
+        let uv = GlyphUV(
+            u: Float(atlasNextX) / Float(atlasWidth),
+            v: Float(atlasNextY) / Float(atlasHeight),
+            uMax: Float(atlasNextX + glyphWidth) / Float(atlasWidth),
+            vMax: Float(atlasNextY + cellHeight) / Float(atlasHeight),
+            cellSpan: cellSpan
+        )
+        glyphUVs[char] = uv
+        atlasNextX += glyphWidth
+        atlasDirty = true
+
+        return uv
+    }
+
+    /// Upload the bitmap context to the Metal texture.
+    private func flushAtlasToTexture() {
+        guard atlasDirty,
+              let ctx = atlasContext,
+              let image = ctx.makeImage(),
+              let dataProvider = image.dataProvider,
+              let cfData = dataProvider.data,
+              let bytes = CFDataGetBytePtr(cfData)
+        else { return }
 
         atlasTexture?.replace(
             region: MTLRegion(
@@ -230,12 +253,30 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
             withBytes: bytes,
             bytesPerRow: atlasWidth * 4
         )
+        atlasDirty = false
+    }
+
+    /// Heuristic to detect wide (2-cell) characters.
+    private func isWideCharacter(_ char: Character) -> Bool {
+        guard let scalar = char.unicodeScalars.first else { return false }
+        let v = scalar.value
+        // CJK Unified Ideographs and extensions
+        if (0x2E80...0x9FFF).contains(v) { return true }
+        if (0xF900...0xFAFF).contains(v) { return true }
+        // CJK Compatibility Ideographs
+        if (0xFE30...0xFE4F).contains(v) { return true }
+        // Hangul Syllables
+        if (0xAC00...0xD7AF).contains(v) { return true }
+        // Fullwidth Forms
+        if (0xFF01...0xFF60).contains(v) { return true }
+        if (0xFFE0...0xFFE6).contains(v) { return true }
+        // CJK Unified Ideographs Extension B+
+        if v >= 0x20000 && v <= 0x2FA1F { return true }
+        return false
     }
 
     // MARK: - Metal Pipeline
 
-    /// Build the render pipeline state from the vertex and fragment functions
-    /// defined in `Shaders.metal`.
     private func buildPipeline() {
         guard let library = device.makeDefaultLibrary() else {
             logger.error("Failed to load default Metal library")
@@ -252,7 +293,6 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         desc.fragmentFunction = fragmentFunc
         desc.colorAttachments[0].pixelFormat = .bgra8Unorm
 
-        // Enable alpha blending so glyph edges blend smoothly.
         desc.colorAttachments[0].isBlendingEnabled = true
         desc.colorAttachments[0].sourceRGBBlendFactor = .sourceAlpha
         desc.colorAttachments[0].destinationRGBBlendFactor = .oneMinusSourceAlpha
@@ -268,17 +308,12 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
 
     // MARK: - Vertex Buffer
 
-    /// Rebuild the vertex buffer from the current ``buffer`` and ``theme``.
-    ///
-    /// Each terminal cell maps to **6 vertices** (2 triangles forming a quad).
-    /// Every vertex carries screen-space position, atlas UV, foreground color,
-    /// and background color.
     func rebuildVertices() {
         guard let buffer = buffer else { return }
 
         let rows = buffer.rows
         let cols = buffer.cols
-        let spaceUV = glyphUVs[" "] ?? GlyphUV(u: 0, v: 0, uMax: 0, vMax: 0)
+        let spaceUV = glyphUVs[" "] ?? GlyphUV(u: 0, v: 0, uMax: 0, vMax: 0, cellSpan: 1)
 
         var vertices: [CellVertex] = []
         vertices.reserveCapacity(rows * cols * 6)
@@ -286,11 +321,32 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         let cw = Float(cellWidth)
         let ch = Float(cellHeight)
 
+        // First pass: ensure all glyphs are in the atlas.
+        var newGlyphs = false
+        for row in 0..<rows {
+            for col in 0..<cols {
+                let cell = buffer.cellAt(row: row, col: col)
+                // Skip continuation cells (second half of wide characters).
+                if cell.width == 0 { continue }
+                if cell.character != " " && glyphUVs[cell.character] == nil {
+                    ensureGlyph(cell.character)
+                    newGlyphs = true
+                }
+            }
+        }
+        if newGlyphs {
+            flushAtlasToTexture()
+        }
+
+        // Second pass: build vertex data.
         for row in 0..<rows {
             for col in 0..<cols {
                 let cell = buffer.cellAt(row: row, col: col)
 
-                // Resolve colors via theme, respecting the inverse attribute.
+                // Skip continuation cells — the wide character's quad
+                // already covers this column.
+                if cell.width == 0 { continue }
+
                 var fgTermColor = cell.fgColor
                 var bgTermColor = cell.bgColor
                 if cell.isInverse {
@@ -313,16 +369,17 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                     1.0
                 )
 
-                // Quad corners in pixel coordinates.
-                let x0 = Float(col) * cw
-                let y0 = Float(row) * ch
-                let x1 = x0 + cw
-                let y1 = y0 + ch
-
-                // Atlas UVs (fall back to space for unknown characters).
                 let uv = glyphUVs[cell.character] ?? spaceUV
 
-                // Triangle 1 (top-left, top-right, bottom-left).
+                // Use the cell's width from the VT parser for quad sizing.
+                let cellSpan = Int(cell.width)
+                let quadWidth = cw * Float(cellSpan)
+
+                let x0 = Float(col) * cw
+                let y0 = Float(row) * ch
+                let x1 = x0 + quadWidth
+                let y1 = y0 + ch
+
                 vertices.append(CellVertex(
                     position: SIMD2(x0, y0), uv: SIMD2(uv.u, uv.v),
                     fgColor: fg, bgColor: bg))
@@ -333,7 +390,6 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                     position: SIMD2(x0, y1), uv: SIMD2(uv.u, uv.vMax),
                     fgColor: fg, bgColor: bg))
 
-                // Triangle 2 (top-right, bottom-right, bottom-left).
                 vertices.append(CellVertex(
                     position: SIMD2(x1, y0), uv: SIMD2(uv.uMax, uv.v),
                     fgColor: fg, bgColor: bg))
@@ -361,7 +417,6 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     // MARK: - MTKViewDelegate
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        // The viewport changed — force a redraw so the projection matches.
         needsRedraw = true
     }
 
@@ -373,10 +428,6 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc)
         else { return }
 
-        // Vertex rebuild reads TerminalBuffer which is mutated on @MainActor.
-        // Dispatch to main to avoid concurrent access from the render thread.
-        // Guard against deadlock when draw(in:) is called from the main thread
-        // (e.g. enableSetNeedsDisplay mode or manual draw() calls).
         if needsRedraw {
             if Thread.isMainThread {
                 rebuildVertices()
@@ -388,11 +439,11 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
             needsRedraw = false
         }
 
-        // Uniform: viewport size so the vertex shader can convert pixel
-        // coordinates to Metal clip space.
+        // Use bounds (points) not drawableSize (pixels) because vertex
+        // positions are computed in point coordinates (col * cellWidth).
         var viewportSize = SIMD2<Float>(
-            Float(view.drawableSize.width),
-            Float(view.drawableSize.height)
+            Float(view.bounds.width),
+            Float(view.bounds.height)
         )
 
         encoder.setRenderPipelineState(pipelineState)

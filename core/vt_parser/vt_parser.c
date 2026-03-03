@@ -37,7 +37,40 @@ static void scroll_down(VTParserState *p) {
     clear_row(p, top);
 }
 
+/* East Asian Width heuristic — returns 1 for wide (2-cell) characters. */
+static int vt_is_wide_char(uint32_t cp) {
+    /* CJK Radicals Supplement through CJK Unified Ideographs */
+    if (cp >= 0x2E80 && cp <= 0x9FFF) return 1;
+    /* CJK Compatibility Ideographs */
+    if (cp >= 0xF900 && cp <= 0xFAFF) return 1;
+    /* CJK Compatibility Forms */
+    if (cp >= 0xFE30 && cp <= 0xFE4F) return 1;
+    /* Hangul Syllables */
+    if (cp >= 0xAC00 && cp <= 0xD7AF) return 1;
+    /* Fullwidth Forms */
+    if (cp >= 0xFF01 && cp <= 0xFF60) return 1;
+    if (cp >= 0xFFE0 && cp <= 0xFFE6) return 1;
+    /* CJK Unified Ideographs Extension B+ */
+    if (cp >= 0x20000 && cp <= 0x2FA1F) return 1;
+    return 0;
+}
+
 static void put_char(VTParserState *p, uint32_t ch) {
+    int wide = vt_is_wide_char(ch);
+
+    /* Wide character at last column cannot fit — wrap to next line,
+       leaving the last column blank. */
+    if (wide && p->cursor_col >= p->cols - 1 && p->cursor_col < p->cols) {
+        VTCell *cell = cell_at(p, p->cursor_row, p->cursor_col);
+        if (cell) memset(cell, 0, sizeof(VTCell));
+        p->cursor_col = 0;
+        p->cursor_row++;
+        if (p->cursor_row > p->scroll_bottom) {
+            p->cursor_row = p->scroll_bottom;
+            scroll_up(p);
+        }
+    }
+
     if (p->cursor_col >= p->cols) {
         p->cursor_col = 0;
         p->cursor_row++;
@@ -51,9 +84,20 @@ static void put_char(VTParserState *p, uint32_t ch) {
     if (cell) {
         *cell = p->current_attrs;
         cell->character = ch;
-        cell->width = 1;
+        cell->width = wide ? 2 : 1;
     }
     p->cursor_col++;
+
+    /* Wide character: set up the continuation cell (second half). */
+    if (wide) {
+        VTCell *cont = cell_at(p, p->cursor_row, p->cursor_col);
+        if (cont) {
+            *cont = p->current_attrs;
+            cont->character = 0;
+            cont->width = 0;  /* marks continuation cell */
+        }
+        p->cursor_col++;
+    }
 }
 
 /* ---------- SGR (Select Graphic Rendition) ---------- */
@@ -532,6 +576,12 @@ int32_t vt_parser_get_line(const VTParserState *parser, int32_t row, char *buf, 
     int32_t written = 0;
     for (int32_t c = 0; c <= last_nonzero && written < buf_size - 1; c++) {
         const VTCell *cell = cell_at((VTParserState *)parser, row, c);
+        /* Skip continuation cells: the previous cell is wide (width==2)
+           and this cell is its second half (width==0, character==0). */
+        if (c > 0 && cell && cell->width == 0 && cell->character == 0) {
+            const VTCell *prev = cell_at((VTParserState *)parser, row, c - 1);
+            if (prev && prev->width == 2) continue;
+        }
         /* Output space for null gaps (e.g. cursor-positioned content) */
         uint32_t cp = (cell && cell->character != 0) ? cell->character : ' ';
         if (cp < 0x80) {

@@ -18,6 +18,8 @@ enum TerminalColor: Equatable {
 /// A single cell in the terminal grid, holding a character and its attributes.
 struct TerminalCell {
     let character: Character
+    /// Cell width: 0 = continuation (second half of wide char), 1 = normal, 2 = wide (CJK).
+    let width: UInt8
     let fgColor: TerminalColor
     let bgColor: TerminalColor
     let isBold: Bool
@@ -28,6 +30,7 @@ struct TerminalCell {
 
     static let empty = TerminalCell(
         character: " ",
+        width: 1,
         fgColor: .default,
         bgColor: .default,
         isBold: false,
@@ -50,6 +53,10 @@ final class TerminalBuffer {
     // MARK: Internal State
 
     private var parser: VTParserState
+
+    /// Called after each ``feed(_:)`` or ``feedData(_:)`` to notify listeners
+    /// (e.g. the Metal view) that the buffer content has changed.
+    var onUpdate: (() -> Void)?
 
     // MARK: Public Properties
 
@@ -85,6 +92,7 @@ final class TerminalBuffer {
         text.withCString { ptr in
             vt_parser_feed(&parser, ptr, Int32(count))
         }
+        onUpdate?()
     }
 
     /// Feed raw bytes of terminal output.
@@ -95,6 +103,7 @@ final class TerminalBuffer {
             }
             vt_parser_feed(&parser, ptr, Int32(data.count))
         }
+        onUpdate?()
     }
 
     // MARK: Resize
@@ -138,6 +147,7 @@ final class TerminalBuffer {
 
         return TerminalCell(
             character: ch,
+            width: cell.width,
             fgColor: fg,
             bgColor: bg,
             isBold: cell.attrs & 1 != 0,

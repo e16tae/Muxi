@@ -634,3 +634,126 @@ import CVTParser
     // Should contain "AB" + 8 spaces + "CD"
     #expect(line == "AB        CD")
 }
+
+// MARK: - Wide Character (CJK/Hangul) Tests
+
+@Test func testKoreanHangulWidth() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Feed Korean "한" (U+D55C)
+    let text = "한"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+
+    #expect(cell.character == 0xD55C) // correct codepoint
+    #expect(cell.width == 2)          // wide character
+
+    // Continuation cell at col 1
+    var cont = VTCell()
+    vt_parser_get_cell(&parser, 0, 1, &cont)
+    #expect(cont.character == 0)      // no character
+    #expect(cont.width == 0)          // continuation marker
+
+    // Cursor should be at col 2 (after the 2-cell character)
+    #expect(parser.cursor_col == 2)
+}
+
+@Test func testKoreanMixedWithASCII() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // "A한B" — ASCII + wide + ASCII
+    let text = "A한B"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // col 0: 'A' (width=1)
+    var cell0 = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell0)
+    #expect(cell0.character == UInt32(Character("A").asciiValue!))
+    #expect(cell0.width == 1)
+
+    // col 1: '한' (width=2)
+    var cell1 = VTCell()
+    vt_parser_get_cell(&parser, 0, 1, &cell1)
+    #expect(cell1.character == 0xD55C)
+    #expect(cell1.width == 2)
+
+    // col 2: continuation
+    var cell2 = VTCell()
+    vt_parser_get_cell(&parser, 0, 2, &cell2)
+    #expect(cell2.character == 0)
+    #expect(cell2.width == 0)
+
+    // col 3: 'B' (width=1)
+    var cell3 = VTCell()
+    vt_parser_get_cell(&parser, 0, 3, &cell3)
+    #expect(cell3.character == UInt32(Character("B").asciiValue!))
+    #expect(cell3.width == 1)
+
+    // Cursor at col 4
+    #expect(parser.cursor_col == 4)
+}
+
+@Test func testKoreanGetLine() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    let text = "한글테스트"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var buf = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    let line = String(cString: buf)
+
+    #expect(line == "한글테스트")
+}
+
+@Test func testCJKIdeograph() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Chinese character "中" (U+4E2D)
+    let text = "中"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.character == 0x4E2D)
+    #expect(cell.width == 2)
+    #expect(parser.cursor_col == 2)
+}
+
+@Test func testWideCharAtLastColumn() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 10, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Fill 9 columns with 'A', then write a wide char at col 9 (last column).
+    // The wide char doesn't fit, so it should wrap to the next line.
+    let text = "AAAAAAAAA한"  // 9 A's + 1 wide char
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // Col 9 should be blank (the wide char couldn't fit).
+    var cell9 = VTCell()
+    vt_parser_get_cell(&parser, 0, 9, &cell9)
+    #expect(cell9.character == 0)
+
+    // The wide char should be on row 1, col 0.
+    var cellWide = VTCell()
+    vt_parser_get_cell(&parser, 1, 0, &cellWide)
+    #expect(cellWide.character == 0xD55C)
+    #expect(cellWide.width == 2)
+
+    // Continuation at row 1, col 1.
+    var cellCont = VTCell()
+    vt_parser_get_cell(&parser, 1, 1, &cellCont)
+    #expect(cellCont.character == 0)
+    #expect(cellCont.width == 0)
+}

@@ -113,13 +113,12 @@ build_openssl() {
     (
         cd "$work_dir"
 
-        # Configure
-        ./Configure "$target" \
+        # Configure — pass arch and target triple via CFLAGS to avoid
+        # OpenSSL treating them as positional target arguments
+        CFLAGS="-target $target_triple" ./Configure "$target" \
             --prefix="$prefix" \
             --openssldir="$prefix/ssl" \
             -isysroot "$sdk_path" \
-            -arch "$arch" \
-            -target "$target_triple" \
             no-shared \
             no-dso \
             no-hw \

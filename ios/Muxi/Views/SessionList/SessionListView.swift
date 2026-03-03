@@ -31,8 +31,11 @@ struct SessionListView: View {
                                 Label("Delete", systemImage: "trash")
                             }
                         }
+                        .listRowBackground(MuxiTokens.Colors.surfaceDefault)
                     }
                 }
+                .scrollContentBackground(.hidden)
+                .background(MuxiTokens.Colors.surfaceBase)
                 .refreshable {
                     await viewModel.refreshSessions()
                 }

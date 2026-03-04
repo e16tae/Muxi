@@ -69,6 +69,16 @@ final class ConnectionManager {
     /// responses are matched to panes in FIFO order.
     private var capturePaneQueue: [String] = []
 
+    /// Whether the last disconnect was caused by the app going to background.
+    /// When true, `handleForeground()` will auto-reconnect.
+    private(set) var disconnectedByBackground = false
+
+    /// The server from the last background disconnect, used for auto-reconnect.
+    private var lastBackgroundServer: Server?
+
+    /// The tmux session name from the last background disconnect.
+    private var lastBackgroundSession: String?
+
     // MARK: - Reconnect Configuration
 
     /// Maximum number of reconnection attempts before giving up.
@@ -157,6 +167,83 @@ final class ConnectionManager {
         cachedAuth = nil
         capturePaneQueue = []
         lastSentSize = (0, 0)
+    }
+
+    // MARK: - App Lifecycle
+
+    /// Called when the app enters background. Saves connection state,
+    /// cancels the SSH monitor, sends tmux detach, and disconnects.
+    func handleBackground() {
+        if case .attached(let sessionName) = state {
+            lastBackgroundServer = currentServer
+            lastBackgroundSession = sessionName
+            disconnectedByBackground = true
+
+            // Cancel monitor to prevent it from detecting our disconnect
+            // and triggering its own reconnect.
+            sshMonitorTask?.cancel()
+            sshMonitorTask = nil
+
+            // Send tmux detach — single fast write, completes before suspension.
+            Task {
+                try? await sshService.writeToChannel(Data("detach\n".utf8))
+            }
+
+            // Tear down connection state (but keep currentServer and cachedAuth for reconnect).
+            activeChannel = nil
+            tmuxService.resetLineBuffer()
+            paneBuffers = [:]
+            currentPanes = []
+            sshService.disconnect()
+            state = .disconnected
+            sessions = []
+            capturePaneQueue = []
+            lastSentSize = (0, 0)
+        } else if state == .sessionList || state == .connecting {
+            lastBackgroundServer = currentServer
+            lastBackgroundSession = nil
+            disconnectedByBackground = true
+
+            sshMonitorTask?.cancel()
+            sshMonitorTask = nil
+            sshService.disconnect()
+            state = .disconnected
+            sessions = []
+            capturePaneQueue = []
+            lastSentSize = (0, 0)
+        }
+        // If already disconnected, do nothing.
+    }
+
+    /// Called when the app returns to foreground. Auto-reconnects if the
+    /// previous disconnect was caused by backgrounding.
+    func handleForeground() {
+        guard disconnectedByBackground else { return }
+        disconnectedByBackground = false
+
+        guard let server = lastBackgroundServer ?? currentServer,
+              let auth = cachedAuth else {
+            lastBackgroundServer = nil
+            lastBackgroundSession = nil
+            return
+        }
+
+        // Restore state needed by reconnect().
+        currentServer = server
+        let sessionName = lastBackgroundSession
+
+        if let sessionName {
+            state = .attached(sessionName: sessionName)
+        } else {
+            state = .sessionList
+        }
+
+        lastBackgroundServer = nil
+        lastBackgroundSession = nil
+
+        Task {
+            await reconnect()
+        }
     }
 
     // MARK: - Session Management

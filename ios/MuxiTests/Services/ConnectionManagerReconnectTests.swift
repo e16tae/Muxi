@@ -19,6 +19,13 @@ final class ReconnectMockSSHService: SSHServiceProtocol {
     /// The string returned by ``execCommand(_:)``.
     var mockExecResult: String = ""
 
+    /// Per-command overrides. If a command matches a key, that value is returned.
+    /// Falls back to `mockExecResult` if no match.
+    var mockExecResults: [String: String] = [:]
+
+    /// If set, `execCommand` throws this error instead of returning a result.
+    var mockExecError: Error?
+
     func connect(host: String, port: UInt16, username: String, auth: SSHAuth) async throws {
         connectCallCount += 1
         if connectCallCount <= shouldFailConnectCount {
@@ -33,6 +40,11 @@ final class ReconnectMockSSHService: SSHServiceProtocol {
 
     func execCommand(_ command: String) async throws -> String {
         guard state == .connected else { throw SSHError.notConnected }
+        if let error = mockExecError { throw error }
+        // Check for per-command override by prefix match.
+        for (key, value) in mockExecResults {
+            if command.hasPrefix(key) { return value }
+        }
         return mockExecResult
     }
 
@@ -82,7 +94,8 @@ final class ConnectionManagerReconnectTests: XCTestCase {
         sessions sessionOutput: String = "$0:main:1:0",
         maxAttempts: Int = 5
     ) async throws -> ConnectionManager {
-        ssh.mockExecResult = sessionOutput
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = sessionOutput
         let manager = makeManager(ssh: ssh, maxAttempts: maxAttempts)
         _ = try await manager.connect(server: makeServer(), password: "pw")
         return manager
@@ -146,7 +159,7 @@ final class ConnectionManagerReconnectTests: XCTestCase {
         XCTAssertEqual(manager.state, .attached(sessionName: "dev"))
 
         // After reconnect the server only has "prod" -- "dev" is gone.
-        ssh.mockExecResult = "$1:prod:1:0"
+        ssh.mockExecResults["tmux list-sessions"] = "$1:prod:1:0"
         ssh.shouldFailConnectCount = 0
         ssh.connectCallCount = 0
 

@@ -100,6 +100,13 @@ class MockSSHService: SSHServiceProtocol {
     var state: SSHConnectionState = .disconnected
     var mockExecResult: String = ""
 
+    /// Per-command overrides. If a command matches a key, that value is returned.
+    /// Falls back to `mockExecResult` if no match.
+    var mockExecResults: [String: String] = [:]
+
+    /// If set, `execCommand` throws this error instead of returning a result.
+    var mockExecError: Error?
+
     func connect(host: String, port: UInt16, username: String, auth: SSHAuth) async throws {
         state = .connected
     }
@@ -110,6 +117,11 @@ class MockSSHService: SSHServiceProtocol {
 
     func execCommand(_ command: String) async throws -> String {
         guard state == .connected else { throw SSHError.notConnected }
+        if let error = mockExecError { throw error }
+        // Check for per-command override by prefix match.
+        for (key, value) in mockExecResults {
+            if command.hasPrefix(key) { return value }
+        }
         return mockExecResult
     }
 

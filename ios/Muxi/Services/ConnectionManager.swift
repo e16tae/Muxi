@@ -133,6 +133,9 @@ final class ConnectionManager {
             )
             logger.info("SSH connected, querying tmux sessions...")
 
+            // Check tmux availability before querying sessions.
+            try await checkTmuxAvailability()
+
             // Query tmux sessions via a formatted list-sessions command.
             let output = try await sshService.execCommand(
                 "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}'"
@@ -446,6 +449,30 @@ final class ConnectionManager {
             let (_, keyData) = try keychainService.retrieveSSHKey(id: keyId)
             return .key(privateKey: keyData, passphrase: nil)
         }
+    }
+
+    // MARK: - tmux Version Check
+
+    /// Verify that tmux is installed and meets the minimum version.
+    /// Throws ``TmuxError`` if tmux is missing or too old.
+    private func checkTmuxAvailability() async throws {
+        let output: String
+        do {
+            output = try await sshService.execCommand("tmux -V")
+        } catch {
+            // execCommand failure (e.g. command not found exit code) → not installed.
+            throw TmuxError.notInstalled
+        }
+
+        guard let version = TmuxError.parseTmuxVersion(output) else {
+            throw TmuxError.notInstalled
+        }
+
+        if !TmuxError.versionMeetsMinimum(version) {
+            throw TmuxError.versionTooOld(detected: version)
+        }
+
+        logger.info("tmux version \(version) detected")
     }
 
     // MARK: - Callback Wiring

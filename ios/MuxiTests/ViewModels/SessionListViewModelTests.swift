@@ -53,7 +53,8 @@ final class SessionListViewModelTests: XCTestCase {
     func testDeleteSession() async throws {
         let ssh = TrackingSSHService()
         ssh.simulateConnect()
-        ssh.mockExecResult = "$0:work:1:0"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
 
         let manager = ConnectionManager(sshService: ssh)
         // Connect first to populate sessions.
@@ -78,7 +79,8 @@ final class SessionListViewModelTests: XCTestCase {
     func testRefreshSessions() async throws {
         let ssh = TrackingSSHService()
         ssh.simulateConnect()
-        ssh.mockExecResult = "$0:alpha:1:0"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:alpha:1:0"
 
         let manager = ConnectionManager(sshService: ssh)
         let server = Server(name: "T", host: "h", username: "u", authMethod: .password)
@@ -88,7 +90,7 @@ final class SessionListViewModelTests: XCTestCase {
         XCTAssertEqual(manager.sessions[0].name, "alpha")
 
         // Simulate a new session appearing on the server.
-        ssh.mockExecResult = "$0:alpha:1:0\n$1:beta:2:0"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:alpha:1:0\n$1:beta:2:0"
         ssh.executedCommands.removeAll()
 
         let vm = SessionListViewModel(connectionManager: manager)
@@ -107,7 +109,8 @@ final class SessionListViewModelTests: XCTestCase {
     func testAttachSession() async throws {
         let ssh = TrackingSSHService()
         ssh.simulateConnect()
-        ssh.mockExecResult = "$0:dev:1:0"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:dev:1:0"
 
         let manager = ConnectionManager(sshService: ssh)
         let server = Server(name: "T", host: "h", username: "u", authMethod: .password)

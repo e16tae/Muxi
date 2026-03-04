@@ -29,7 +29,8 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testConnectFlow() async throws {
         let ssh = MockSSHService()
-        ssh.mockExecResult = "$0:main:2:1740700800"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:main:2:1740700800"
         let manager = ConnectionManager(sshService: ssh)
 
         let sessions = try await manager.connect(
@@ -44,7 +45,8 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testConnectSetsCurrentServer() async throws {
         let ssh = MockSSHService()
-        ssh.mockExecResult = "$0:dev:1:0"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:dev:1:0"
         let manager = ConnectionManager(sshService: ssh)
         let server = makeServer(name: "MyServer", host: "10.0.0.1")
 
@@ -56,7 +58,8 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testConnectParsesMultipleSessions() async throws {
         let ssh = MockSSHService()
-        ssh.mockExecResult = """
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = """
             $0:main:2:1740700800
             $1:dev:1:1740700900
             $2:staging:3:1740701000
@@ -77,7 +80,8 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testConnectWithEmptySessionList() async throws {
         let ssh = MockSSHService()
-        ssh.mockExecResult = ""
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = ""
         let manager = ConnectionManager(sshService: ssh)
 
         let sessions = try await manager.connect(
@@ -93,7 +97,8 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testDisconnect() async throws {
         let ssh = MockSSHService()
-        ssh.mockExecResult = "$0:test:1:0"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:test:1:0"
         let manager = ConnectionManager(sshService: ssh)
         _ = try await manager.connect(server: makeServer(), password: "p")
 
@@ -115,7 +120,8 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testAttachSession() async throws {
         let ssh = MockSSHService()
-        ssh.mockExecResult = "$0:work:1:0"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
         let manager = ConnectionManager(sshService: ssh)
         let sessions = try await manager.connect(server: makeServer(), password: "p")
 
@@ -126,7 +132,8 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testDetach() async throws {
         let ssh = MockSSHService()
-        ssh.mockExecResult = "$0:work:1:0"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
         let manager = ConnectionManager(sshService: ssh)
         let sessions = try await manager.connect(server: makeServer(), password: "p")
         try await manager.attachSession(sessions[0])
@@ -140,7 +147,8 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testAttachSessionCallsStartShell() async throws {
         let ssh = MockSSHService()
-        ssh.mockExecResult = "$0:work:1:0"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
         let manager = ConnectionManager(sshService: ssh)
         let sessions = try await manager.connect(server: makeServer(), password: "p")
 
@@ -152,7 +160,8 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testDisconnectCleansUpChannel() async throws {
         let ssh = MockSSHService()
-        ssh.mockExecResult = "$0:work:1:0"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
         let manager = ConnectionManager(sshService: ssh)
         let sessions = try await manager.connect(server: makeServer(), password: "p")
         try await manager.attachSession(sessions[0])
@@ -166,7 +175,8 @@ final class ConnectionManagerTests: XCTestCase {
 
     func testDetachResetsToSessionList() async throws {
         let ssh = MockSSHService()
-        ssh.mockExecResult = "$0:work:1:0"
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
         let manager = ConnectionManager(sshService: ssh)
         let sessions = try await manager.connect(server: makeServer(), password: "p")
         try await manager.attachSession(sessions[0])
@@ -176,6 +186,70 @@ final class ConnectionManagerTests: XCTestCase {
         XCTAssertEqual(manager.state, .sessionList)
         XCTAssertNil(manager.activeChannel)
         XCTAssertTrue(manager.paneBuffers.isEmpty)
+    }
+
+    // MARK: - tmux Detection
+
+    func testConnectThrowsWhenTmuxNotInstalled() async {
+        let ssh = MockSSHService()
+        ssh.mockExecResults["tmux -V"] = "bash: tmux: command not found\n"
+        let manager = ConnectionManager(sshService: ssh)
+
+        do {
+            _ = try await manager.connect(server: makeServer(), password: "p")
+            XCTFail("Expected TmuxError.notInstalled")
+        } catch let error as TmuxError {
+            XCTAssertEqual(error, .notInstalled)
+        } catch {
+            XCTFail("Wrong error type: \(error)")
+        }
+        XCTAssertEqual(manager.state, .disconnected)
+    }
+
+    func testConnectThrowsWhenTmuxVersionTooOld() async {
+        let ssh = MockSSHService()
+        ssh.mockExecResults["tmux -V"] = "tmux 1.6\n"
+        let manager = ConnectionManager(sshService: ssh)
+
+        do {
+            _ = try await manager.connect(server: makeServer(), password: "p")
+            XCTFail("Expected TmuxError.versionTooOld")
+        } catch let error as TmuxError {
+            if case .versionTooOld(let detected) = error {
+                XCTAssertEqual(detected, "1.6")
+            } else {
+                XCTFail("Wrong TmuxError case: \(error)")
+            }
+        } catch {
+            XCTFail("Wrong error type: \(error)")
+        }
+        XCTAssertEqual(manager.state, .disconnected)
+    }
+
+    func testConnectSucceedsWithValidTmuxVersion() async throws {
+        let ssh = MockSSHService()
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:main:2:1740700800"
+        let manager = ConnectionManager(sshService: ssh)
+
+        let sessions = try await manager.connect(server: makeServer(), password: "p")
+        XCTAssertEqual(manager.state, .sessionList)
+        XCTAssertEqual(sessions.count, 1)
+    }
+
+    func testConnectThrowsWhenExecCommandFails() async {
+        let ssh = MockSSHService()
+        ssh.mockExecError = SSHError.channelError("exec failed")
+        let manager = ConnectionManager(sshService: ssh)
+
+        do {
+            _ = try await manager.connect(server: makeServer(), password: "p")
+            XCTFail("Expected error")
+        } catch let error as TmuxError {
+            XCTAssertEqual(error, .notInstalled)
+        } catch {
+            // Other SSH errors may also be thrown — acceptable
+        }
     }
 
     // MARK: - State Equality

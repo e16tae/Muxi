@@ -17,6 +17,14 @@ enum ConnectionState: Equatable, Sendable {
     case reconnecting
 }
 
+// MARK: - ScrollbackError
+
+/// Errors specific to scrollback fetch operations.
+enum ScrollbackError: Error, Equatable {
+    case notAttached
+    case fetchInProgress
+}
+
 // MARK: - ConnectionManager
 
 /// Orchestrates SSH connection, tmux session querying, and state management.
@@ -68,6 +76,11 @@ final class ConnectionManager {
     /// Each ``capture-pane -e -p -t %<id>`` triggers a %begin/%end block;
     /// responses are matched to panes in FIFO order.
     private var capturePaneQueue: [String] = []
+
+    /// Continuation waiting for a scrollback `capture-pane` response.
+    /// Set by ``fetchScrollback(paneId:)`` and resumed by
+    /// ``deliverScrollbackResponse(_:)``.
+    private var scrollbackContinuation: CheckedContinuation<String, Error>?
 
     /// Whether the last disconnect was caused by the app going to background.
     /// When true, `handleForeground()` will auto-reconnect.
@@ -433,6 +446,44 @@ final class ConnectionManager {
         reconnectAttempt = 0
     }
 
+    // MARK: - Scrollback
+
+    /// Fetch scrollback history for a pane from tmux.
+    ///
+    /// Sends `capture-pane -e -p -S -500` to fetch up to 500 lines of
+    /// history with ANSI color escapes. Returns the raw response string.
+    ///
+    /// - Parameter paneId: The tmux pane ID (e.g., "%0").
+    /// - Returns: The captured scrollback content with ANSI escapes.
+    func fetchScrollback(paneId: String) async throws -> String {
+        switch state {
+        case .disconnected, .connecting, .reconnecting:
+            throw ScrollbackError.notAttached
+        case .sessionList, .attached:
+            break
+        }
+        guard scrollbackContinuation == nil else {
+            throw ScrollbackError.fetchInProgress
+        }
+
+        return try await withCheckedThrowingContinuation { continuation in
+            scrollbackContinuation = continuation
+            let cmd = "capture-pane -e -p -S -500 -t \(paneId.shellEscaped())\n"
+            Task {
+                try? await sshServiceForWrites.writeToChannel(Data(cmd.utf8))
+                logger.info("Sent scrollback capture-pane for \(paneId)")
+            }
+        }
+    }
+
+    /// Deliver a scrollback capture-pane response from tmux.
+    /// Called by ``onCommandResponse`` when a scrollback fetch is pending.
+    func deliverScrollbackResponse(_ response: String) {
+        guard let continuation = scrollbackContinuation else { return }
+        scrollbackContinuation = nil
+        continuation.resume(returning: response)
+    }
+
     // MARK: - Auth Resolution
 
     /// Resolve the ``SSHAuth`` credentials for a server by looking up secrets
@@ -526,13 +577,19 @@ final class ConnectionManager {
 
         tmuxService.onCommandResponse = { [weak self] response in
             guard let self else { return }
+
+            // If a scrollback fetch is pending, deliver the response to it.
+            if self.scrollbackContinuation != nil {
+                self.deliverScrollbackResponse(response)
+                return
+            }
+
             guard let paneId = self.capturePaneQueue.first else {
                 self.logger.info("Command response with no pending capture-pane")
                 return
             }
             self.capturePaneQueue.removeFirst()
             self.logger.info("capture-pane response for \(paneId): \(response.count) chars")
-            // Feed the captured content (with ANSI escapes) into the buffer.
             if !response.isEmpty {
                 self.paneBuffers[paneId]?.feed(response)
             }

@@ -252,6 +252,90 @@ final class ConnectionManagerTests: XCTestCase {
         }
     }
 
+    // MARK: - Scrollback Fetch
+
+    func testFetchScrollbackSuccessReturnsResponse() async throws {
+        let ssh = MockSSHService()
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:test:1:0"
+        let manager = ConnectionManager(sshService: ssh)
+        _ = try await manager.connect(server: makeServer(), password: "p")
+        // State is .sessionList — fetchScrollback accepts this state.
+
+        let fetchTask = Task {
+            try await manager.fetchScrollback(paneId: "%0")
+        }
+
+        // Give the fetch task time to send the command and set up continuation.
+        try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+
+        // Simulate tmux responding with scrollback content.
+        manager.deliverScrollbackResponse("line1\nline2\nline3")
+
+        let result = try await fetchTask.value
+        XCTAssertEqual(result, "line1\nline2\nline3")
+    }
+
+    func testFetchScrollbackEmptyResponseReturnsEmptyString() async throws {
+        let ssh = MockSSHService()
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:test:1:0"
+        let manager = ConnectionManager(sshService: ssh)
+        _ = try await manager.connect(server: makeServer(), password: "p")
+
+        let fetchTask = Task {
+            try await manager.fetchScrollback(paneId: "%0")
+        }
+
+        try await Task.sleep(nanoseconds: 50_000_000) // 50ms
+        manager.deliverScrollbackResponse("")
+
+        let result = try await fetchTask.value
+        XCTAssertEqual(result, "")
+    }
+
+    func testFetchScrollbackThrowsWhenDisconnected() async {
+        let manager = ConnectionManager(sshService: MockSSHService())
+        XCTAssertEqual(manager.state, .disconnected)
+
+        do {
+            _ = try await manager.fetchScrollback(paneId: "%0")
+            XCTFail("Expected ScrollbackError.notAttached")
+        } catch let error as ScrollbackError {
+            XCTAssertEqual(error, .notAttached)
+        } catch {
+            XCTFail("Wrong error type: \(error)")
+        }
+    }
+
+    func testFetchScrollbackThrowsWhenFetchAlreadyInProgress() async throws {
+        let ssh = MockSSHService()
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:test:1:0"
+        let manager = ConnectionManager(sshService: ssh)
+        _ = try await manager.connect(server: makeServer(), password: "p")
+
+        // Start first fetch but do not deliver response yet.
+        let firstTask = Task {
+            try await manager.fetchScrollback(paneId: "%0")
+        }
+        try await Task.sleep(nanoseconds: 50_000_000) // 50ms — let first task set continuation
+
+        // Second fetch should fail immediately.
+        do {
+            _ = try await manager.fetchScrollback(paneId: "%0")
+            XCTFail("Expected ScrollbackError.fetchInProgress")
+        } catch let error as ScrollbackError {
+            XCTAssertEqual(error, .fetchInProgress)
+        } catch {
+            XCTFail("Wrong error type: \(error)")
+        }
+
+        // Clean up: deliver response to unblock the first task.
+        manager.deliverScrollbackResponse("done")
+        _ = try await firstTask.value
+    }
+
     // MARK: - State Equality
 
     func testConnectionStateEquality() {

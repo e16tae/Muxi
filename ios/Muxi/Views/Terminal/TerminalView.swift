@@ -98,6 +98,7 @@ struct TerminalView: UIViewRepresentable {
             target: context.coordinator,
             action: #selector(Coordinator.handleTap(_:))
         )
+        tap.require(toFail: pan)
         mtkView.addGestureRecognizer(tap)
 
         return mtkView
@@ -251,6 +252,8 @@ struct TerminalView: UIViewRepresentable {
 
             switch gesture.state {
             case .began:
+                // v1: selection only works in live mode (not scrollback).
+                guard renderer?.scrollOffset == 0 else { return }
                 // Start selection at the long-press anchor.
                 selectionStart = pos
                 selectionEnd = pos

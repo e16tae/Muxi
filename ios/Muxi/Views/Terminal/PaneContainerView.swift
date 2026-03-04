@@ -62,6 +62,7 @@ struct PaneContainerView: View {
     @Binding var activePaneId: String?
     /// Called when the user taps a pane (iPad) or selects a tab (iPhone).
     var onPaneTapped: ((String) -> Void)?
+    var onPaste: ((String) -> Void)?
     @State private var selectedPaneIndex: Int = 0
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -114,7 +115,7 @@ struct PaneContainerView: View {
     private var compactLayout: some View {
         VStack(spacing: 0) {
             if let pane = panes[safe: selectedPaneIndex] {
-                TerminalView(buffer: pane.buffer, theme: theme, channel: pane.channel)
+                TerminalView(buffer: pane.buffer, theme: theme, channel: pane.channel, onPaste: onPaste)
                     .contentShape(Rectangle())
                     .onTapGesture {
                         activePaneId = pane.id
@@ -176,7 +177,7 @@ struct PaneContainerView: View {
                     if index < frames.count {
                         let frame = frames[index]
 
-                        TerminalView(buffer: pane.buffer, theme: theme, channel: pane.channel)
+                        TerminalView(buffer: pane.buffer, theme: theme, channel: pane.channel, onPaste: onPaste)
                             .frame(width: frame.width, height: frame.height)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 0)

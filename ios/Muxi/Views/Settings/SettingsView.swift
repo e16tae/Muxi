@@ -9,6 +9,8 @@ struct SettingsView: View {
             appearanceSection
             aboutSection
         }
+        .scrollContentBackground(.hidden)
+        .background(MuxiTokens.Colors.surfaceBase)
         .navigationTitle("Settings")
     }
 
@@ -28,6 +30,7 @@ struct SettingsView: View {
                         .foregroundStyle(MuxiTokens.Colors.textSecondary)
                 }
             }
+            .listRowBackground(MuxiTokens.Colors.surfaceDefault)
 
             HStack {
                 Label("Font Size", systemImage: "textformat.size")
@@ -39,6 +42,7 @@ struct SettingsView: View {
                 Stepper("", value: fontSizeBinding, in: 10...24, step: 2)
                     .labelsHidden()
             }
+            .listRowBackground(MuxiTokens.Colors.surfaceDefault)
         }
     }
 
@@ -61,6 +65,7 @@ struct SettingsView: View {
                 Text(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")
                     .foregroundStyle(MuxiTokens.Colors.textSecondary)
             }
+            .listRowBackground(MuxiTokens.Colors.surfaceDefault)
         }
     }
 }

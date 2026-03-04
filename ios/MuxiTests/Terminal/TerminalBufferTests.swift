@@ -227,6 +227,20 @@ final class TerminalBufferTests: XCTestCase {
         XCTAssertEqual(text, "Hi")
     }
 
+    func testTextWithReversedSelection() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("Hello, World!")
+        let forward = buffer.text(
+            from: (row: 0, col: 0),
+            to: (row: 0, col: 12)
+        )
+        let reversed = buffer.text(
+            from: (row: 0, col: 12),
+            to: (row: 0, col: 0)
+        )
+        XCTAssertEqual(forward, reversed)
+    }
+
     func testTextWithEmptySelection() {
         let buffer = TerminalBuffer(cols: 80, rows: 24)
         buffer.feed("Hello")

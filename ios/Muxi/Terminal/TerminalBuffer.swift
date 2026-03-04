@@ -172,7 +172,7 @@ final class TerminalBuffer {
 
     // MARK: - Text Extraction
 
-    /// Extract text from a rectangular selection in the buffer.
+    /// Extract text from a linear selection in the buffer.
     ///
     /// Iterates cell-by-cell from `start` to `end`, skipping wide-character
     /// continuation cells (width == 0) and trimming trailing whitespace per line.
@@ -193,11 +193,17 @@ final class TerminalBuffer {
             (s, e) = (end, start)
         }
 
+        // Clamp to buffer bounds.
+        let sRow = max(0, min(s.row, rows - 1))
+        let sCol = max(0, min(s.col, cols - 1))
+        let eRow = max(0, min(e.row, rows - 1))
+        let eCol = max(0, min(e.col, cols - 1))
+
         var lines: [String] = []
-        for row in s.row...e.row {
+        for row in sRow...eRow {
             var line = ""
-            let colStart = row == s.row ? s.col : 0
-            let colEnd = row == e.row ? e.col : cols - 1
+            let colStart = row == sRow ? sCol : 0
+            let colEnd = row == eRow ? eCol : cols - 1
             guard colStart <= colEnd else {
                 lines.append("")
                 continue

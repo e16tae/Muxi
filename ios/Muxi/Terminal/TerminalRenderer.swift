@@ -356,18 +356,23 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                 let fgTheme = theme.resolve(fgTermColor, isForeground: true)
                 let bgTheme = theme.resolve(bgTermColor, isForeground: false)
 
-                let fg = SIMD4<Float>(
+                var fg = SIMD4<Float>(
                     Float(fgTheme.r) / 255.0,
                     Float(fgTheme.g) / 255.0,
                     Float(fgTheme.b) / 255.0,
                     1.0
                 )
-                let bg = SIMD4<Float>(
+                var bg = SIMD4<Float>(
                     Float(bgTheme.r) / 255.0,
                     Float(bgTheme.g) / 255.0,
                     Float(bgTheme.b) / 255.0,
                     1.0
                 )
+
+                // Block cursor: invert fg/bg at cursor position.
+                if row == buffer.cursorRow && col == buffer.cursorCol {
+                    swap(&fg, &bg)
+                }
 
                 let uv = glyphUVs[cell.character] ?? spaceUV
 

@@ -48,6 +48,9 @@ struct TerminalSessionView: View {
                             activePaneId: $activePaneId,
                             onPaneTapped: { _ in
                                 isKeyboardActive = true
+                            },
+                            onPaste: { text in
+                                pasteToActivePane(text)
                             }
                         )
                         .onChange(of: geometry.size) { _, newSize in
@@ -178,6 +181,23 @@ struct TerminalSessionView: View {
                 try await connectionManager.sshServiceForWrites.writeToChannel(Data(fullCommand.utf8))
             } catch {
                 logger.error("Failed to send tmux command: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Paste clipboard text to the active pane via tmux set-buffer + paste-buffer.
+    /// Uses a named buffer ("ios_paste") to avoid clobbering the user's global
+    /// paste buffer. tmux automatically wraps with bracketed paste sequences
+    /// if the pane's application has enabled bracketed paste mode.
+    private func pasteToActivePane(_ text: String) {
+        guard let paneId = activePaneId, !text.isEmpty else { return }
+        let escaped = text.tmuxQuoted()
+        let command = "set-buffer -b ios_paste -- \(escaped)\npaste-buffer -b ios_paste -t \(paneId.shellEscaped()) -d\n"
+        Task {
+            do {
+                try await connectionManager.sshServiceForWrites.writeToChannel(Data(command.utf8))
+            } catch {
+                logger.error("Failed to paste to pane \(paneId): \(error.localizedDescription)")
             }
         }
     }

@@ -47,6 +47,7 @@ struct TerminalSessionView: View {
                         PaneContainerView(
                             panes: panes,
                             theme: themeManager.currentTheme,
+                            fontSize: themeManager.fontSize,
                             activePaneId: $activePaneId,
                             onPaneTapped: { _ in
                                 isKeyboardActive = true
@@ -71,6 +72,9 @@ struct TerminalSessionView: View {
                         )
                         .onChange(of: geometry.size) { _, newSize in
                             updateTerminalSize(newSize)
+                        }
+                        .onChange(of: themeManager.fontSize) { _, _ in
+                            updateTerminalSize(geometry.size)
                         }
                         .onAppear {
                             updateTerminalSize(geometry.size)
@@ -136,7 +140,7 @@ struct TerminalSessionView: View {
     /// Calculate terminal columns and rows from the available view size
     /// and notify tmux so TUI apps can adapt.
     private func updateTerminalSize(_ size: CGSize) {
-        let (cellW, cellH) = Self.terminalCellSize()
+        let (cellW, cellH) = Self.terminalCellSize(fontSize: themeManager.fontSize)
         guard cellW > 0, cellH > 0 else { return }
 
         let cols = max(Int(size.width / cellW), 1)
@@ -152,9 +156,9 @@ struct TerminalSessionView: View {
 
     /// Calculate monospace cell dimensions using the same font the
     /// renderer uses. This avoids coupling the view to the renderer.
-    static func terminalCellSize() -> (width: CGFloat, height: CGFloat) {
-        let font = UIFont(name: "Sarasa Term K Nerd Font", size: 14)
-            ?? UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+    static func terminalCellSize(fontSize: CGFloat = 14) -> (width: CGFloat, height: CGFloat) {
+        let font = UIFont(name: "Sarasa Term K Nerd Font", size: fontSize)
+            ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
         let ctFont = CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil)
         var glyph = CTFontGetGlyphWithName(ctFont, "M" as CFString)
         var advance = CGSize.zero

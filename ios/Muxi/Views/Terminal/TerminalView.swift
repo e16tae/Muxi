@@ -11,6 +11,7 @@ struct TerminalView: UIViewRepresentable {
     let theme: Theme
     var channel: SSHChannel?
     var onPaste: ((String) -> Void)?
+    var fontSize: CGFloat = 14
 
     // Scrollback
     var scrollbackBuffer: TerminalBuffer?
@@ -46,8 +47,8 @@ struct TerminalView: UIViewRepresentable {
         // Font family name registered in the TTF: "Sarasa Term K Nerd Font"
         // PostScript name: "Sarasa-Term-K-Nerd-Font-Regular"
         // Download font: ./scripts/download-fonts.sh
-        let font = UIFont(name: "Sarasa Term K Nerd Font", size: 14)
-            ?? UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
+        let font = UIFont(name: "Sarasa Term K Nerd Font", size: fontSize)
+            ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
         if let renderer = TerminalRenderer(device: device, font: font, theme: theme) {
             renderer.buffer = buffer
@@ -55,6 +56,7 @@ struct TerminalView: UIViewRepresentable {
             context.coordinator.renderer = renderer
             context.coordinator.mtkView = mtkView
             context.coordinator.cellHeight = renderer.cellHeight
+            context.coordinator.currentFontSize = fontSize
 
             // Set the clear color to match the theme background.
             let bg = theme.background
@@ -137,6 +139,16 @@ struct TerminalView: UIViewRepresentable {
         if bufferChanged {
             context.coordinator.requestRedraw()
         }
+
+        // Update font if size changed.
+        if context.coordinator.currentFontSize != fontSize {
+            context.coordinator.currentFontSize = fontSize
+            let newFont = UIFont(name: "Sarasa Term K Nerd Font", size: fontSize)
+                ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+            context.coordinator.renderer?.updateFont(newFont)
+            context.coordinator.cellHeight = context.coordinator.renderer?.cellHeight ?? 0
+            context.coordinator.requestRedraw()
+        }
     }
 
     // MARK: - Coordinator
@@ -154,6 +166,7 @@ struct TerminalView: UIViewRepresentable {
         var editMenuInteraction: UIEditMenuInteraction?
         var onScrollOffsetChanged: ((Int) -> Void)?
         var cellHeight: CGFloat = 0
+        var currentFontSize: CGFloat = 14
         private var accumulatedPanDelta: CGFloat = 0
 
         init(buffer: TerminalBuffer, channel: SSHChannel?, theme: Theme,

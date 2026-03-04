@@ -59,6 +59,7 @@ struct PaneLayout {
 struct PaneContainerView: View {
     let panes: [PaneInfo]
     let theme: Theme
+    var fontSize: CGFloat = 14
     @Binding var activePaneId: String?
     /// Called when the user taps a pane (iPad) or selects a tab (iPhone).
     var onPaneTapped: ((String) -> Void)?
@@ -128,6 +129,7 @@ struct PaneContainerView: View {
                     theme: theme,
                     channel: pane.channel,
                     onPaste: onPaste,
+                    fontSize: fontSize,
                     scrollbackBuffer: scrollbackBuffer,
                     scrollOffset: scrollbackOffset,
                     onScrollOffsetChanged: { delta in
@@ -227,6 +229,7 @@ struct PaneContainerView: View {
                             theme: theme,
                             channel: pane.channel,
                             onPaste: onPaste,
+                            fontSize: fontSize,
                             scrollbackBuffer: scrollbackBuffer,
                             scrollOffset: scrollbackOffset,
                             onScrollOffsetChanged: { delta in

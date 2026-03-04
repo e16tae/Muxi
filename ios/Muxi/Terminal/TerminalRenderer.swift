@@ -367,6 +367,28 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
             flushAtlasToTexture()
         }
 
+        // Pre-compute normalized selection bounds outside the loop.
+        let normalizedSelection: (start: (row: Int, col: Int), end: (row: Int, col: Int))?
+        let selectionBgColor: SIMD4<Float>?
+        if let sel = selectionRange {
+            if sel.start.row < sel.end.row
+                || (sel.start.row == sel.end.row && sel.start.col <= sel.end.col) {
+                normalizedSelection = (start: sel.start, end: sel.end)
+            } else {
+                normalizedSelection = (start: sel.end, end: sel.start)
+            }
+            let sc = theme.selection
+            selectionBgColor = SIMD4<Float>(
+                Float(sc.r) / 255.0,
+                Float(sc.g) / 255.0,
+                Float(sc.b) / 255.0,
+                1.0
+            )
+        } else {
+            normalizedSelection = nil
+            selectionBgColor = nil
+        }
+
         // Second pass: build vertex data.
         for row in rowRange {
             // Map source row to screen row (0-based for vertex positioning).
@@ -405,39 +427,22 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                 }
 
                 // Selection highlight: override background with theme selection color.
-                if let sel = selectionRange {
-                    let selStart: (row: Int, col: Int)
-                    let selEnd: (row: Int, col: Int)
-                    if sel.start.row < sel.end.row
-                        || (sel.start.row == sel.end.row && sel.start.col <= sel.end.col) {
-                        selStart = sel.start
-                        selEnd = sel.end
-                    } else {
-                        selStart = sel.end
-                        selEnd = sel.start
-                    }
-
+                if let sel = normalizedSelection {
                     let inSelection: Bool
-                    if screenRow > selStart.row && screenRow < selEnd.row {
+                    if screenRow > sel.start.row && screenRow < sel.end.row {
                         inSelection = true
-                    } else if screenRow == selStart.row && screenRow == selEnd.row {
-                        inSelection = col >= selStart.col && col <= selEnd.col
-                    } else if screenRow == selStart.row {
-                        inSelection = col >= selStart.col
-                    } else if screenRow == selEnd.row {
-                        inSelection = col <= selEnd.col
+                    } else if screenRow == sel.start.row && screenRow == sel.end.row {
+                        inSelection = col >= sel.start.col && col <= sel.end.col
+                    } else if screenRow == sel.start.row {
+                        inSelection = col >= sel.start.col
+                    } else if screenRow == sel.end.row {
+                        inSelection = col <= sel.end.col
                     } else {
                         inSelection = false
                     }
 
                     if inSelection {
-                        let sc = theme.selection
-                        bg = SIMD4<Float>(
-                            Float(sc.r) / 255.0,
-                            Float(sc.g) / 255.0,
-                            Float(sc.b) / 255.0,
-                            1.0
-                        )
+                        bg = selectionBgColor!
                     }
                 }
 

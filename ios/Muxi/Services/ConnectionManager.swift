@@ -184,21 +184,22 @@ final class ConnectionManager {
             sshMonitorTask?.cancel()
             sshMonitorTask = nil
 
-            // Send tmux detach — single fast write, completes before suspension.
-            Task {
-                try? await sshService.writeToChannel(Data("detach\n".utf8))
-            }
-
-            // Tear down connection state (but keep currentServer and cachedAuth for reconnect).
+            // Clear UI state immediately (keep currentServer and cachedAuth for reconnect).
             activeChannel = nil
             tmuxService.resetLineBuffer()
             paneBuffers = [:]
             currentPanes = []
-            sshService.disconnect()
             state = .disconnected
             sessions = []
             capturePaneQueue = []
             lastSentSize = (0, 0)
+
+            // Send detach THEN disconnect — ordering guaranteed within same Task.
+            // Without this, disconnect() could tear down the channel before detach is sent.
+            Task {
+                try? await sshService.writeToChannel(Data("detach\n".utf8))
+                sshService.disconnect()
+            }
         } else if state == .sessionList || state == .connecting {
             lastBackgroundServer = currentServer
             lastBackgroundSession = nil
@@ -222,7 +223,7 @@ final class ConnectionManager {
         disconnectedByBackground = false
 
         guard let server = lastBackgroundServer ?? currentServer,
-              let auth = cachedAuth else {
+              cachedAuth != nil else {
             lastBackgroundServer = nil
             lastBackgroundSession = nil
             return

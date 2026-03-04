@@ -214,7 +214,7 @@ final class TerminalBuffer {
                 line.append(cell.character)
             }
             // Trim trailing whitespace (match lineText behavior).
-            while line.hasSuffix(" ") {
+            while line.last == " " {
                 line.removeLast()
             }
             lines.append(line)

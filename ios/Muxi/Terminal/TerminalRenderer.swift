@@ -367,26 +367,29 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
             flushAtlasToTexture()
         }
 
-        // Pre-compute normalized selection bounds outside the loop.
-        let normalizedSelection: (start: (row: Int, col: Int), end: (row: Int, col: Int))?
-        let selectionBgColor: SIMD4<Float>?
+        // Pre-compute normalized selection bounds and color outside the loop.
+        let selectionInfo: (start: (row: Int, col: Int), end: (row: Int, col: Int), bgColor: SIMD4<Float>)?
         if let sel = selectionRange {
+            let normalized: (start: (row: Int, col: Int), end: (row: Int, col: Int))
             if sel.start.row < sel.end.row
                 || (sel.start.row == sel.end.row && sel.start.col <= sel.end.col) {
-                normalizedSelection = (start: sel.start, end: sel.end)
+                normalized = (start: sel.start, end: sel.end)
             } else {
-                normalizedSelection = (start: sel.end, end: sel.start)
+                normalized = (start: sel.end, end: sel.start)
             }
             let sc = theme.selection
-            selectionBgColor = SIMD4<Float>(
-                Float(sc.r) / 255.0,
-                Float(sc.g) / 255.0,
-                Float(sc.b) / 255.0,
-                1.0
+            selectionInfo = (
+                start: normalized.start,
+                end: normalized.end,
+                bgColor: SIMD4<Float>(
+                    Float(sc.r) / 255.0,
+                    Float(sc.g) / 255.0,
+                    Float(sc.b) / 255.0,
+                    1.0
+                )
             )
         } else {
-            normalizedSelection = nil
-            selectionBgColor = nil
+            selectionInfo = nil
         }
 
         // Second pass: build vertex data.
@@ -427,7 +430,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                 }
 
                 // Selection highlight: override background with theme selection color.
-                if let sel = normalizedSelection {
+                if let sel = selectionInfo {
                     let inSelection: Bool
                     if screenRow > sel.start.row && screenRow < sel.end.row {
                         inSelection = true
@@ -442,7 +445,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                     }
 
                     if inSelection {
-                        bg = selectionBgColor!
+                        bg = sel.bgColor
                     }
                 }
 

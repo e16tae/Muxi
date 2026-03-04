@@ -260,11 +260,13 @@ struct TerminalView: UIViewRepresentable {
                 updateRendererSelection()
 
             case .changed:
+                guard selectionStart != nil else { return }
                 // Extend selection as finger drags.
                 selectionEnd = pos
                 updateRendererSelection()
 
             case .ended:
+                guard selectionStart != nil else { return }
                 // Show edit menu at the touch location.
                 selectionEnd = pos
                 updateRendererSelection()

@@ -128,7 +128,7 @@ struct TerminalSessionView: View {
     /// Calculate monospace cell dimensions using the same font the
     /// renderer uses. This avoids coupling the view to the renderer.
     static func terminalCellSize() -> (width: CGFloat, height: CGFloat) {
-        let font = UIFont(name: "Sarasa Mono SC Nerd Font", size: 14)
+        let font = UIFont(name: "Sarasa Term K Nerd Font", size: 14)
             ?? UIFont.monospacedSystemFont(ofSize: 14, weight: .regular)
         let ctFont = CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil)
         var glyph = CTFontGetGlyphWithName(ctFont, "M" as CFString)

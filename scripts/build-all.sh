@@ -36,12 +36,16 @@ if ! command -v cmake &>/dev/null; then
     exit 1
 fi
 
+# ── Step 0: Download fonts ────────────────────────────────────────────────
+log "Step 0/3: Downloading fonts"
+"$SCRIPT_DIR/download-fonts.sh"
+
 # ── Step 1: Build OpenSSL ───────────────────────────────────────────────────
-log "Step 1/2: Building OpenSSL"
+log "Step 1/3: Building OpenSSL"
 "$SCRIPT_DIR/build-openssl.sh"
 
 # ── Step 2: Build libssh2 ──────────────────────────────────────────────────
-log "Step 2/2: Building libssh2"
+log "Step 2/3: Building libssh2"
 "$SCRIPT_DIR/build-libssh2.sh"
 
 # ── Done ────────────────────────────────────────────────────────────────────

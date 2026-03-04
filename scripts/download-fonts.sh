@@ -1,14 +1,9 @@
 #!/usr/bin/env bash
-# download-fonts.sh — Download Sarasa Gothic Mono Nerd Font for bundling
-#
-# Output:
-#   ios/Muxi/Resources/Fonts/SarasaMonoSC-NF-Regular.ttf
+# download-fonts.sh — Download Sarasa Term K Nerd Font for Muxi iOS
+# Produces: ios/Muxi/Resources/Fonts/sarasa-term-k-regular-nerd-font.ttf
 #
 # Usage: ./scripts/download-fonts.sh
-# Requirements: curl, unzip, internet access (first run)
-#
-# This script is idempotent — re-running it will skip if the font is present.
-# To force a re-download, delete the Fonts directory first.
+# Requirements: internet access (first run only)
 
 set -euo pipefail
 
@@ -16,58 +11,42 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FONTS_DIR="$PROJECT_ROOT/ios/Muxi/Resources/Fonts"
 
-# Skip if already present
-if [[ -f "$FONTS_DIR/SarasaMonoSC-NF-Regular.ttf" ]]; then
-    echo "==> Font already present, skipping download."
+FONT_VERSION="v1.0.35-0"
+FONT_ZIP_NAME="sarasa-term-k-nerd-font.zip"
+FONT_URL="https://github.com/jonz94/Sarasa-Gothic-Nerd-Fonts/releases/download/${FONT_VERSION}/${FONT_ZIP_NAME}"
+FONT_ZIP_SHA256="a62a01ec64e09ed523784183f6f5e52fdba768f1971afa3a871c0c80675886bf"
+FONT_TTF_NAME="sarasa-term-k-regular-nerd-font.ttf"
+
+log() { echo "==> $*"; }
+err() { echo "ERROR: $*" >&2; exit 1; }
+
+# Skip if already downloaded
+if [[ -f "$FONTS_DIR/$FONT_TTF_NAME" ]]; then
+    log "Font already exists at $FONTS_DIR/$FONT_TTF_NAME"
+    log "Delete it to force a re-download."
     exit 0
 fi
 
-# Sarasa Gothic Nerd Fonts release from jonz94/Sarasa-Gothic-Nerd-Fonts
-RELEASE_TAG="v1.1.0"
-ZIP_NAME="sarasa-mono-sc-nerd-font.zip"
-DOWNLOAD_URL="https://github.com/jonz94/Sarasa-Gothic-Nerd-Fonts/releases/download/${RELEASE_TAG}/${ZIP_NAME}"
-
+# Download to temp dir (cleaned up on exit)
 TEMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
-# TODO: Verify this hash against trusted source (see build-openssl.sh for pattern)
-FONT_SHA256="SKIP"
+FONT_ZIP="$TEMP_DIR/$FONT_ZIP_NAME"
 
-echo "==> Downloading Sarasa Mono SC Nerd Font (${RELEASE_TAG})..."
-curl -fSL "$DOWNLOAD_URL" -o "$TEMP_DIR/$ZIP_NAME"
+log "Downloading Sarasa Term K Nerd Font ${FONT_VERSION}..."
+curl -fSL "$FONT_URL" -o "$FONT_ZIP"
 
-if [[ "$FONT_SHA256" != "SKIP" ]]; then
-    echo "==> Verifying checksum..."
-    echo "$FONT_SHA256  $TEMP_DIR/$ZIP_NAME" | shasum -a 256 --check || {
-        echo "ERROR: Checksum verification failed for font archive" >&2
-        exit 1
-    }
-else
-    echo "==> WARNING: Checksum verification skipped (set FONT_SHA256 to enable)"
-fi
-
-echo "==> Extracting Regular weight..."
-mkdir -p "$FONTS_DIR"
-
-# Extract only the Regular weight TTF from the zip
-unzip -jo "$TEMP_DIR/$ZIP_NAME" "*Regular.ttf" -d "$TEMP_DIR/extracted" 2>/dev/null || {
-    # Try alternate naming pattern
-    unzip -jo "$TEMP_DIR/$ZIP_NAME" "*regular.ttf" -d "$TEMP_DIR/extracted" 2>/dev/null || {
-        echo "ERROR: Could not find Regular weight TTF in archive" >&2
-        exit 1
-    }
+# Verify SHA-256
+log "Verifying checksum..."
+echo "$FONT_ZIP_SHA256  $FONT_ZIP" | shasum -a 256 --check || {
+    err "Checksum verification failed for $FONT_ZIP"
 }
 
-# Find the extracted TTF and copy with a consistent name
-FOUND=$(find "$TEMP_DIR/extracted" -name "*[Rr]egular*.ttf" | head -1)
-if [[ -z "$FOUND" ]]; then
-    echo "ERROR: No Regular weight TTF found after extraction" >&2
-    exit 1
-fi
+# Extract Regular weight only
+log "Extracting $FONT_TTF_NAME..."
+mkdir -p "$FONTS_DIR"
+unzip -j "$FONT_ZIP" "$FONT_TTF_NAME" -d "$FONTS_DIR"
 
-cp "$FOUND" "$FONTS_DIR/SarasaMonoSC-NF-Regular.ttf"
-
-echo "==> Font installed to $FONTS_DIR/"
-ls -la "$FONTS_DIR/SarasaMonoSC-NF-Regular.ttf"
-echo ""
-echo "Done. The font will be bundled into the app on next build."
+log ""
+log "Font installed: $FONTS_DIR/$FONT_TTF_NAME"
+log "Size: $(du -h "$FONTS_DIR/$FONT_TTF_NAME" | cut -f1)"

@@ -63,6 +63,15 @@ struct PaneContainerView: View {
     /// Called when the user taps a pane (iPad) or selects a tab (iPhone).
     var onPaneTapped: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
+
+    // Scrollback
+    var scrollbackBuffer: TerminalBuffer?
+    var scrollbackOffset: Int = 0
+    var onScrollOffsetChanged: ((String, Int) -> Void)?
+    var onScrollbackNeeded: ((String) -> Void)?
+    var showNewOutputIndicator: Bool = false
+    var onReturnToLive: ((String) -> Void)?
+
     @State private var selectedPaneIndex: Int = 0
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -115,13 +124,53 @@ struct PaneContainerView: View {
     private var compactLayout: some View {
         VStack(spacing: 0) {
             if let pane = panes[safe: selectedPaneIndex] {
-                TerminalView(buffer: pane.buffer, theme: theme, channel: pane.channel, onPaste: onPaste)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        activePaneId = pane.id
-                        onPaneTapped?(pane.id)
+                TerminalView(
+                    buffer: pane.buffer,
+                    theme: theme,
+                    channel: pane.channel,
+                    onPaste: onPaste,
+                    scrollbackBuffer: scrollbackBuffer,
+                    scrollOffset: scrollbackOffset,
+                    onScrollOffsetChanged: { delta in
+                        onScrollOffsetChanged?(pane.id, delta)
+                    },
+                    onScrollbackNeeded: {
+                        onScrollbackNeeded?(pane.id)
                     }
-                    .onAppear { activePaneId = pane.id }
+                )
+                .overlay(alignment: .bottom) {
+                    if showNewOutputIndicator,
+                       scrollbackOffset > 0,
+                       pane.id == activePaneId {
+                        Button {
+                            onReturnToLive?(pane.id)
+                        } label: {
+                            HStack(spacing: MuxiTokens.Spacing.xs) {
+                                Image(systemName: "arrow.down")
+                                Text("New output")
+                            }
+                            .font(MuxiTokens.Typography.caption)
+                            .padding(.horizontal, MuxiTokens.Spacing.md)
+                            .padding(.vertical, MuxiTokens.Spacing.sm)
+                            .background(
+                                RoundedRectangle(
+                                    cornerRadius: MuxiTokens.Radius.sm,
+                                    style: .continuous
+                                )
+                                .fill(MuxiTokens.Colors.accentDefault)
+                            )
+                            .foregroundStyle(.white)
+                        }
+                        .padding(.bottom, MuxiTokens.Spacing.md)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    activePaneId = pane.id
+                    onPaneTapped?(pane.id)
+                }
+                .onAppear { activePaneId = pane.id }
             }
 
             if panes.count > 1 {
@@ -177,7 +226,20 @@ struct PaneContainerView: View {
                     if index < frames.count {
                         let frame = frames[index]
 
-                        TerminalView(buffer: pane.buffer, theme: theme, channel: pane.channel, onPaste: onPaste)
+                        TerminalView(
+                            buffer: pane.buffer,
+                            theme: theme,
+                            channel: pane.channel,
+                            onPaste: onPaste,
+                            scrollbackBuffer: scrollbackBuffer,
+                            scrollOffset: scrollbackOffset,
+                            onScrollOffsetChanged: { delta in
+                                onScrollOffsetChanged?(pane.id, delta)
+                            },
+                            onScrollbackNeeded: {
+                                onScrollbackNeeded?(pane.id)
+                            }
+                        )
                             .frame(width: frame.width, height: frame.height)
                             .overlay(
                                 RoundedRectangle(cornerRadius: 0)
@@ -188,6 +250,33 @@ struct PaneContainerView: View {
                                         lineWidth: 2
                                     )
                             )
+                            .overlay(alignment: .bottom) {
+                                if showNewOutputIndicator,
+                                   scrollbackOffset > 0,
+                                   pane.id == activePaneId {
+                                    Button {
+                                        onReturnToLive?(pane.id)
+                                    } label: {
+                                        HStack(spacing: MuxiTokens.Spacing.xs) {
+                                            Image(systemName: "arrow.down")
+                                            Text("New output")
+                                        }
+                                        .font(MuxiTokens.Typography.caption)
+                                        .padding(.horizontal, MuxiTokens.Spacing.md)
+                                        .padding(.vertical, MuxiTokens.Spacing.sm)
+                                        .background(
+                                            RoundedRectangle(
+                                                cornerRadius: MuxiTokens.Radius.sm,
+                                                style: .continuous
+                                            )
+                                            .fill(MuxiTokens.Colors.accentDefault)
+                                        )
+                                        .foregroundStyle(.white)
+                                    }
+                                    .padding(.bottom, MuxiTokens.Spacing.md)
+                                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                                }
+                            }
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 activePaneId = pane.id

@@ -16,6 +16,9 @@ struct TerminalSessionView: View {
     @State private var activePaneId: String?
     @State private var inputHandler = InputHandler()
     @State private var isKeyboardActive = false
+    @State private var scrollbackState: [String: ScrollbackState] = [:]
+    @State private var scrollbackCaches: [String: TerminalBuffer] = [:]
+    @State private var hasNewOutput: [String: Bool] = [:]
 
     /// Build pane info from ConnectionManager's live pane data.
     private var panes: [PaneContainerView.PaneInfo] {
@@ -51,6 +54,23 @@ struct TerminalSessionView: View {
                             },
                             onPaste: { text in
                                 pasteToActivePane(text)
+                            },
+                            scrollbackBuffer: activePaneId.flatMap { scrollbackCaches[$0] },
+                            scrollbackOffset: activePaneId.flatMap {
+                                if case .scrolling(let offset, _) = scrollbackState[$0] {
+                                    return offset
+                                }
+                                return nil
+                            } ?? 0,
+                            onScrollOffsetChanged: { paneId, delta in
+                                handleScrollDelta(paneId: paneId, delta: delta)
+                            },
+                            onScrollbackNeeded: { paneId in
+                                fetchScrollbackIfNeeded(paneId: paneId)
+                            },
+                            showNewOutputIndicator: activePaneId.flatMap { hasNewOutput[$0] } ?? false,
+                            onReturnToLive: { paneId in
+                                returnToLive(paneId: paneId)
                             }
                         )
                         .onChange(of: geometry.size) { _, newSize in
@@ -200,5 +220,69 @@ struct TerminalSessionView: View {
                 logger.error("Failed to paste to pane \(paneId): \(error.localizedDescription)")
             }
         }
+    }
+
+    // MARK: - Scrollback
+
+    private func handleScrollDelta(paneId: String, delta: Int) {
+        let currentState = scrollbackState[paneId] ?? .live
+
+        switch currentState {
+        case .live where delta > 0:
+            fetchScrollbackIfNeeded(paneId: paneId)
+
+        case .scrolling(let offset, let totalLines):
+            let buffer = connectionManager.paneBuffers[paneId]
+            let visibleRows = buffer?.rows ?? 24
+            let newOffset = ScrollbackState.clampedOffset(
+                offset + delta, totalLines: totalLines, visibleRows: visibleRows
+            )
+            if newOffset == 0 {
+                returnToLive(paneId: paneId)
+            } else {
+                scrollbackState[paneId] = .scrolling(
+                    offset: newOffset, totalLines: totalLines
+                )
+            }
+
+        default:
+            break
+        }
+    }
+
+    private func fetchScrollbackIfNeeded(paneId: String) {
+        guard scrollbackState[paneId] != .loading else { return }
+        scrollbackState[paneId] = .loading
+
+        Task {
+            do {
+                let response = try await connectionManager.fetchScrollback(paneId: paneId)
+                guard !response.isEmpty else {
+                    scrollbackState[paneId] = .live
+                    return
+                }
+
+                let lines = response.components(separatedBy: "\n")
+                let liveBuffer = connectionManager.paneBuffers[paneId]
+                let cols = liveBuffer?.cols ?? 80
+                let cacheBuffer = TerminalBuffer(cols: cols, rows: lines.count)
+                cacheBuffer.feed(response)
+
+                scrollbackCaches[paneId] = cacheBuffer
+                scrollbackState[paneId] = .scrolling(
+                    offset: 1, totalLines: lines.count
+                )
+                hasNewOutput[paneId] = false
+            } catch {
+                logger.error("Scrollback fetch failed: \(error.localizedDescription)")
+                scrollbackState[paneId] = .live
+            }
+        }
+    }
+
+    private func returnToLive(paneId: String) {
+        scrollbackState[paneId] = .live
+        scrollbackCaches[paneId] = nil
+        hasNewOutput[paneId] = false
     }
 }

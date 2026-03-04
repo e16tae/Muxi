@@ -46,6 +46,13 @@ final class ConnectionManager {
     /// The current connection state.
     private(set) var state: ConnectionState = .disconnected
 
+    #if DEBUG
+    /// Test-only: override the connection state for unit tests.
+    func setStateForTesting(_ newState: ConnectionState) {
+        state = newState
+    }
+    #endif
+
     /// The server we are currently connected (or connecting) to.
     private(set) var currentServer: Server?
 

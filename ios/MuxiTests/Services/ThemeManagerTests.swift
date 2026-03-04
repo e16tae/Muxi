@@ -41,4 +41,37 @@ struct ThemeManagerTests {
         let savedId = UserDefaults.standard.string(forKey: "selectedThemeId")
         #expect(savedId == secondTheme.id)
     }
+
+    @Test("Default font size is 14")
+    @MainActor func defaultFontSize() {
+        let manager = ThemeManager()
+        #expect(manager.fontSize == 14)
+    }
+
+    @Test("Set font size updates value")
+    @MainActor func setFontSize() {
+        let manager = ThemeManager()
+        manager.setFontSize(18)
+        #expect(manager.fontSize == 18)
+    }
+
+    @Test("Font size clamps to valid range")
+    @MainActor func fontSizeClamps() {
+        let manager = ThemeManager()
+        manager.setFontSize(6)
+        #expect(manager.fontSize == 10)
+        manager.setFontSize(30)
+        #expect(manager.fontSize == 24)
+    }
+
+    @Test("Font size persists to UserDefaults")
+    @MainActor func fontSizePersists() {
+        defer {
+            UserDefaults.standard.removeObject(forKey: "terminalFontSize")
+        }
+        let manager = ThemeManager()
+        manager.setFontSize(20)
+        let saved = UserDefaults.standard.double(forKey: "terminalFontSize")
+        #expect(saved == 20)
+    }
 }

@@ -18,6 +18,14 @@ final class ThemeManager {
     private(set) var currentTheme: Theme = .catppuccinMocha
 
     private let selectedThemeKey = "selectedThemeId"
+    private let fontSizeKey = "terminalFontSize"
+    private static let defaultFontSize: CGFloat = 14
+    private static let minFontSize: CGFloat = 10
+    private static let maxFontSize: CGFloat = 24
+    private static let fontSizeStep: CGFloat = 2
+
+    /// Terminal font size in points. Persisted via UserDefaults.
+    private(set) var fontSize: CGFloat = defaultFontSize
 
     init() {
         themes = Theme.loadBundledThemes()
@@ -30,6 +38,12 @@ final class ThemeManager {
         } else if let first = themes.first {
             currentTheme = first
         }
+
+        // Restore saved font size.
+        let savedSize = UserDefaults.standard.double(forKey: fontSizeKey)
+        if savedSize > 0 {
+            fontSize = max(Self.minFontSize, min(savedSize, Self.maxFontSize))
+        }
     }
 
     /// Select a new theme and persist the choice.
@@ -37,5 +51,14 @@ final class ThemeManager {
         currentTheme = theme
         UserDefaults.standard.set(theme.id, forKey: selectedThemeKey)
         logger.info("Theme changed to: \(theme.name)")
+    }
+
+    /// Set the terminal font size and persist the choice.
+    /// Clamps to the valid range (10--24pt).
+    func setFontSize(_ size: CGFloat) {
+        let clamped = max(Self.minFontSize, min(size, Self.maxFontSize))
+        fontSize = clamped
+        UserDefaults.standard.set(clamped, forKey: fontSizeKey)
+        logger.info("Font size changed to: \(clamped)")
     }
 }

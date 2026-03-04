@@ -169,4 +169,50 @@ final class TerminalBuffer {
         vt_parser_get_line(&parser, Int32(row), &buf, Int32(bufSize))
         return String(cString: buf)
     }
+
+    // MARK: - Text Extraction
+
+    /// Extract text from a rectangular selection in the buffer.
+    ///
+    /// Iterates cell-by-cell from `start` to `end`, skipping wide-character
+    /// continuation cells (width == 0) and trimming trailing whitespace per line.
+    ///
+    /// - Parameters:
+    ///   - start: The (row, col) of the selection start.
+    ///   - end: The (row, col) of the selection end.
+    /// - Returns: The selected text with lines joined by `\n`.
+    func text(
+        from start: (row: Int, col: Int),
+        to end: (row: Int, col: Int)
+    ) -> String {
+        // Normalize so start is always before end.
+        let (s, e): ((row: Int, col: Int), (row: Int, col: Int))
+        if start.row < end.row || (start.row == end.row && start.col <= end.col) {
+            (s, e) = (start, end)
+        } else {
+            (s, e) = (end, start)
+        }
+
+        var lines: [String] = []
+        for row in s.row...e.row {
+            var line = ""
+            let colStart = row == s.row ? s.col : 0
+            let colEnd = row == e.row ? e.col : cols - 1
+            guard colStart <= colEnd else {
+                lines.append("")
+                continue
+            }
+            for col in colStart...colEnd {
+                let cell = cellAt(row: row, col: col)
+                if cell.width == 0 { continue }
+                line.append(cell.character)
+            }
+            // Trim trailing whitespace (match lineText behavior).
+            while line.hasSuffix(" ") {
+                line.removeLast()
+            }
+            lines.append(line)
+        }
+        return lines.joined(separator: "\n")
+    }
 }

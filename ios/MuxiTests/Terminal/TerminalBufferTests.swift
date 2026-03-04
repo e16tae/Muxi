@@ -184,6 +184,60 @@ final class TerminalBufferTests: XCTestCase {
         XCTAssertFalse(empty.isStrikethrough)
     }
 
+    // MARK: - Text Extraction
+
+    func testTextFromSingleLine() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("Hello, World!")
+        let text = buffer.text(
+            from: (row: 0, col: 0),
+            to: (row: 0, col: 12)
+        )
+        XCTAssertEqual(text, "Hello, World!")
+    }
+
+    func testTextFromPartialLine() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("Hello, World!")
+        let text = buffer.text(
+            from: (row: 0, col: 7),
+            to: (row: 0, col: 11)
+        )
+        XCTAssertEqual(text, "World")
+    }
+
+    func testTextFromMultipleLines() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("Line one\r\nLine two\r\nLine three")
+        let text = buffer.text(
+            from: (row: 0, col: 5),
+            to: (row: 2, col: 9)
+        )
+        XCTAssertEqual(text, "one\nLine two\nLine three")
+    }
+
+    func testTextTrimsTrailingSpaces() {
+        let buffer = TerminalBuffer(cols: 10, rows: 5)
+        buffer.feed("Hi")
+        // "Hi" followed by 8 spaces to fill the row — trailing spaces should be trimmed.
+        let text = buffer.text(
+            from: (row: 0, col: 0),
+            to: (row: 0, col: 9)
+        )
+        XCTAssertEqual(text, "Hi")
+    }
+
+    func testTextWithEmptySelection() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("Hello")
+        // Single cell selection.
+        let text = buffer.text(
+            from: (row: 0, col: 0),
+            to: (row: 0, col: 0)
+        )
+        XCTAssertEqual(text, "H")
+    }
+
     // MARK: - TerminalColor Equatable
 
     func testTerminalColorEquality() {

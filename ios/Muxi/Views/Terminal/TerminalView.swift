@@ -56,6 +56,7 @@ struct TerminalView: UIViewRepresentable {
             context.coordinator.renderer = renderer
             context.coordinator.mtkView = mtkView
             context.coordinator.cellHeight = renderer.cellHeight
+            context.coordinator.cellWidth = renderer.cellWidth
             context.coordinator.currentFontSize = fontSize
 
             // Set the clear color to match the theme background.
@@ -92,6 +93,12 @@ struct TerminalView: UIViewRepresentable {
             action: #selector(Coordinator.handlePan(_:))
         )
         mtkView.addGestureRecognizer(pan)
+
+        let tap = UITapGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handleTap(_:))
+        )
+        mtkView.addGestureRecognizer(tap)
 
         return mtkView
     }
@@ -147,6 +154,7 @@ struct TerminalView: UIViewRepresentable {
                 ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
             context.coordinator.renderer?.updateFont(newFont)
             context.coordinator.cellHeight = context.coordinator.renderer?.cellHeight ?? 0
+            context.coordinator.cellWidth = context.coordinator.renderer?.cellWidth ?? 0
             context.coordinator.requestRedraw()
         }
     }
@@ -167,6 +175,12 @@ struct TerminalView: UIViewRepresentable {
         var onScrollOffsetChanged: ((Int) -> Void)?
         var cellHeight: CGFloat = 0
         var currentFontSize: CGFloat = 14
+        /// Selection anchor (where long press started), in screen-space row/col.
+        var selectionStart: (row: Int, col: Int)?
+        /// Selection end (current drag position), in screen-space row/col.
+        var selectionEnd: (row: Int, col: Int)?
+        /// Cached cell width for coordinate mapping.
+        var cellWidth: CGFloat = 0
         private var accumulatedPanDelta: CGFloat = 0
 
         init(buffer: TerminalBuffer, channel: SSHChannel?, theme: Theme,
@@ -190,6 +204,15 @@ struct TerminalView: UIViewRepresentable {
         func requestRedraw() {
             renderer?.needsRedraw = true
             mtkView?.setNeedsDisplay()
+        }
+
+        /// Convert a touch point (in the MTKView's coordinate space) to
+        /// a terminal grid position (row, col).
+        func gridPosition(from point: CGPoint) -> (row: Int, col: Int) {
+            guard cellWidth > 0, cellHeight > 0 else { return (0, 0) }
+            let col = max(0, min(Int(point.x / cellWidth), buffer.cols - 1))
+            let row = max(0, min(Int(point.y / cellHeight), buffer.rows - 1))
+            return (row, col)
         }
 
         // MARK: - Scroll
@@ -219,15 +242,65 @@ struct TerminalView: UIViewRepresentable {
             }
         }
 
-        // MARK: - Paste
+        // MARK: - Selection & Paste
 
         @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-            guard gesture.state == .began,
-                  let interaction = editMenuInteraction,
-                  let view = gesture.view else { return }
-            let location = gesture.location(in: view)
-            let config = UIEditMenuConfiguration(identifier: nil, sourcePoint: location)
-            interaction.presentEditMenu(with: config)
+            guard let view = gesture.view else { return }
+            let point = gesture.location(in: view)
+            let pos = gridPosition(from: point)
+
+            switch gesture.state {
+            case .began:
+                // Start selection at the long-press anchor.
+                selectionStart = pos
+                selectionEnd = pos
+                updateRendererSelection()
+
+            case .changed:
+                // Extend selection as finger drags.
+                selectionEnd = pos
+                updateRendererSelection()
+
+            case .ended:
+                // Show edit menu at the touch location.
+                selectionEnd = pos
+                updateRendererSelection()
+                if let interaction = editMenuInteraction {
+                    let config = UIEditMenuConfiguration(
+                        identifier: nil, sourcePoint: point
+                    )
+                    interaction.presentEditMenu(with: config)
+                }
+
+            case .cancelled, .failed:
+                clearSelection()
+
+            default:
+                break
+            }
+        }
+
+        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
+            guard gesture.state == .ended else { return }
+            if selectionStart != nil {
+                clearSelection()
+            }
+        }
+
+        private func clearSelection() {
+            selectionStart = nil
+            selectionEnd = nil
+            renderer?.selectionRange = nil
+            requestRedraw()
+        }
+
+        private func updateRendererSelection() {
+            guard let start = selectionStart, let end = selectionEnd else {
+                renderer?.selectionRange = nil
+                return
+            }
+            renderer?.selectionRange = (start: start, end: end)
+            requestRedraw()
         }
 
         func editMenuInteraction(
@@ -235,12 +308,34 @@ struct TerminalView: UIViewRepresentable {
             menuFor configuration: UIEditMenuConfiguration,
             suggestedActions: [UIMenuElement]
         ) -> UIMenu? {
-            guard UIPasteboard.general.hasStrings else { return nil }
-            let paste = UIAction(title: "Paste", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
-                guard let text = UIPasteboard.general.string else { return }
-                self?.onPaste?(text)
+            var actions: [UIAction] = []
+
+            // Copy action — available when text is selected.
+            if let start = selectionStart, let end = selectionEnd {
+                let copy = UIAction(
+                    title: "Copy",
+                    image: UIImage(systemName: "doc.on.doc")
+                ) { [weak self] _ in
+                    let text = self?.buffer.text(from: start, to: end) ?? ""
+                    UIPasteboard.general.string = text
+                    self?.clearSelection()
+                }
+                actions.append(copy)
             }
-            return UIMenu(children: [paste])
+
+            // Paste action — available when clipboard has text.
+            if UIPasteboard.general.hasStrings {
+                let paste = UIAction(
+                    title: "Paste",
+                    image: UIImage(systemName: "doc.on.clipboard")
+                ) { [weak self] _ in
+                    guard let text = UIPasteboard.general.string else { return }
+                    self?.onPaste?(text)
+                }
+                actions.append(paste)
+            }
+
+            return actions.isEmpty ? nil : UIMenu(children: actions)
         }
     }
 }

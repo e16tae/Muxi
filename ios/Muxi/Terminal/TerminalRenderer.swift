@@ -91,6 +91,13 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     /// Number of lines scrolled back from the bottom. 0 = live mode.
     var scrollOffset: Int = 0
 
+    // MARK: - Selection
+
+    /// The currently selected range, if any. When set, `rebuildVertices()`
+    /// renders selected cells with the theme's selection background color.
+    /// Coordinates are in screen-space (0-based row/col of the visible area).
+    var selectionRange: (start: (row: Int, col: Int), end: (row: Int, col: Int))?
+
     // MARK: - Init
 
     init?(device: MTLDevice, font: UIFont, theme: Theme) {
@@ -395,6 +402,43 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                 if !isScrollback,
                    row == source.cursorRow && col == source.cursorCol {
                     swap(&fg, &bg)
+                }
+
+                // Selection highlight: override background with theme selection color.
+                if let sel = selectionRange {
+                    let selStart: (row: Int, col: Int)
+                    let selEnd: (row: Int, col: Int)
+                    if sel.start.row < sel.end.row
+                        || (sel.start.row == sel.end.row && sel.start.col <= sel.end.col) {
+                        selStart = sel.start
+                        selEnd = sel.end
+                    } else {
+                        selStart = sel.end
+                        selEnd = sel.start
+                    }
+
+                    let inSelection: Bool
+                    if screenRow > selStart.row && screenRow < selEnd.row {
+                        inSelection = true
+                    } else if screenRow == selStart.row && screenRow == selEnd.row {
+                        inSelection = col >= selStart.col && col <= selEnd.col
+                    } else if screenRow == selStart.row {
+                        inSelection = col >= selStart.col
+                    } else if screenRow == selEnd.row {
+                        inSelection = col <= selEnd.col
+                    } else {
+                        inSelection = false
+                    }
+
+                    if inSelection {
+                        let sc = theme.selection
+                        bg = SIMD4<Float>(
+                            Float(sc.r) / 255.0,
+                            Float(sc.g) / 255.0,
+                            Float(sc.b) / 255.0,
+                            1.0
+                        )
+                    }
                 }
 
                 let uv = glyphUVs[cell.character] ?? spaceUV

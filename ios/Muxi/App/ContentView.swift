@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var showingPasswordPrompt = false
     @State private var previousAttachedSession: String?
     @State private var sessionListViewModel: SessionListViewModel?
+    @State private var tmuxGuideReason: TmuxInstallGuideView.Reason?
 
     var body: some View {
         ZStack {
@@ -92,6 +93,15 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: connectionManager.state)
         .animation(.easeInOut(duration: 0.25), value: showErrorBanner)
+        .sheet(item: $tmuxGuideReason) { reason in
+            TmuxInstallGuideView(
+                reason: reason,
+                serverName: selectedServer?.name ?? selectedServer?.host ?? "server",
+                onDismiss: {
+                    tmuxGuideReason = nil
+                }
+            )
+        }
         .alert("Enter Password", isPresented: $showingPasswordPrompt) {
             SecureField("Password", text: $passwordPrompt)
             Button("Connect") {
@@ -248,6 +258,13 @@ struct ContentView: View {
                     password: password
                 )
                 // On success the state transitions to .sessionList automatically.
+            } catch let error as TmuxError {
+                switch error {
+                case .notInstalled:
+                    tmuxGuideReason = .notInstalled
+                case .versionTooOld(let detected):
+                    tmuxGuideReason = .versionTooOld(detected: detected)
+                }
             } catch {
                 withAnimation {
                     errorMessage = "Connection failed: \(error.localizedDescription)"

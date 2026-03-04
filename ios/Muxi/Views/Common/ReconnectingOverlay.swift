@@ -214,6 +214,15 @@ struct TmuxInstallGuideView: View {
     }
 }
 
+extension TmuxInstallGuideView.Reason: Identifiable {
+    var id: String {
+        switch self {
+        case .notInstalled: return "notInstalled"
+        case .versionTooOld(let v): return "versionTooOld-\(v)"
+        }
+    }
+}
+
 // MARK: - Previews
 
 #Preview("Reconnecting Overlay") {

@@ -12,10 +12,21 @@ struct TerminalView: UIViewRepresentable {
     var channel: SSHChannel?
     var onPaste: ((String) -> Void)?
 
+    // Scrollback
+    var scrollbackBuffer: TerminalBuffer?
+    var scrollOffset: Int = 0
+    var onScrollOffsetChanged: ((Int) -> Void)?
+    var onScrollbackNeeded: (() -> Void)?
+
     // MARK: - UIViewRepresentable
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(buffer: buffer, channel: channel, theme: theme, onPaste: onPaste)
+        Coordinator(
+            buffer: buffer, channel: channel, theme: theme,
+            onPaste: onPaste,
+            onScrollOffsetChanged: onScrollOffsetChanged,
+            onScrollbackNeeded: onScrollbackNeeded
+        )
     }
 
     func makeUIView(context: Context) -> MTKView {
@@ -45,6 +56,7 @@ struct TerminalView: UIViewRepresentable {
             mtkView.delegate = renderer
             context.coordinator.renderer = renderer
             context.coordinator.mtkView = mtkView
+            context.coordinator.cellHeight = renderer.cellHeight
 
             // Set the clear color to match the theme background.
             let bg = theme.background
@@ -75,6 +87,12 @@ struct TerminalView: UIViewRepresentable {
         )
         mtkView.addGestureRecognizer(longPress)
 
+        let pan = UIPanGestureRecognizer(
+            target: context.coordinator,
+            action: #selector(Coordinator.handlePan(_:))
+        )
+        mtkView.addGestureRecognizer(pan)
+
         return mtkView
     }
 
@@ -82,6 +100,17 @@ struct TerminalView: UIViewRepresentable {
         // Update coordinator references in case they changed (e.g. after reconnect)
         context.coordinator.channel = channel
         context.coordinator.onPaste = onPaste
+
+        // Update scrollback state on renderer.
+        context.coordinator.renderer?.scrollbackBuffer = scrollbackBuffer
+        context.coordinator.renderer?.scrollOffset = scrollOffset
+        context.coordinator.onScrollOffsetChanged = onScrollOffsetChanged
+        context.coordinator.onScrollbackNeeded = onScrollbackNeeded
+
+        if context.coordinator.renderer?.scrollOffset != scrollOffset {
+            context.coordinator.requestRedraw()
+        }
+
         let bufferChanged = context.coordinator.renderer?.buffer !== buffer
         context.coordinator.renderer?.buffer = buffer
 
@@ -125,12 +154,21 @@ struct TerminalView: UIViewRepresentable {
         var currentTheme: Theme
         var onPaste: ((String) -> Void)?
         var editMenuInteraction: UIEditMenuInteraction?
+        var onScrollOffsetChanged: ((Int) -> Void)?
+        var onScrollbackNeeded: (() -> Void)?
+        var cellHeight: CGFloat = 0
+        private var accumulatedPanDelta: CGFloat = 0
 
-        init(buffer: TerminalBuffer, channel: SSHChannel?, theme: Theme, onPaste: ((String) -> Void)?) {
+        init(buffer: TerminalBuffer, channel: SSHChannel?, theme: Theme,
+             onPaste: ((String) -> Void)?,
+             onScrollOffsetChanged: ((Int) -> Void)?,
+             onScrollbackNeeded: (() -> Void)?) {
             self.buffer = buffer
             self.channel = channel
             self.currentTheme = theme
             self.onPaste = onPaste
+            self.onScrollOffsetChanged = onScrollOffsetChanged
+            self.onScrollbackNeeded = onScrollbackNeeded
         }
 
         /// Send text input to the SSH channel.
@@ -144,6 +182,33 @@ struct TerminalView: UIViewRepresentable {
         func requestRedraw() {
             renderer?.needsRedraw = true
             mtkView?.setNeedsDisplay()
+        }
+
+        // MARK: - Scroll
+
+        @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard cellHeight > 0 else { return }
+
+            switch gesture.state {
+            case .changed:
+                let translation = gesture.translation(in: gesture.view)
+                gesture.setTranslation(.zero, in: gesture.view)
+
+                // Negative y = scrolling up (viewing history).
+                accumulatedPanDelta += -translation.y
+                let linesDelta = Int(accumulatedPanDelta / cellHeight)
+
+                if linesDelta != 0 {
+                    accumulatedPanDelta -= CGFloat(linesDelta) * cellHeight
+                    onScrollOffsetChanged?(linesDelta)
+                }
+
+            case .ended, .cancelled:
+                accumulatedPanDelta = 0
+
+            default:
+                break
+            }
         }
 
         // MARK: - Paste

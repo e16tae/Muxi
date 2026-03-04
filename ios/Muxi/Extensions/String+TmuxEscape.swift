@@ -8,6 +8,9 @@ extension String {
     /// Escapes: `\` `"` `$` newline CR tab ESC, plus any other C0/DEL
     /// control characters via `\uXXXX`.  UTF-8 text passes through
     /// unchanged (tmux handles UTF-8 natively).
+    ///
+    /// Note: `#` is not escaped — safe for `set-buffer` which does not
+    /// expand format strings, but not for format-expanding commands.
     func tmuxQuoted() -> String {
         var result = "\""
         for scalar in unicodeScalars {

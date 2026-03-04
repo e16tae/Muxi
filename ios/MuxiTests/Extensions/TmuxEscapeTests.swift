@@ -1,79 +1,80 @@
-import XCTest
+import Testing
 @testable import Muxi
 
-final class TmuxEscapeTests: XCTestCase {
+@Suite("TmuxEscape")
+struct TmuxEscapeTests {
 
     // MARK: - Basic Escaping
 
-    func testPlainASCII() {
-        XCTAssertEqual("hello".tmuxQuoted(), "\"hello\"")
+    @Test func plainASCII() {
+        #expect("hello".tmuxQuoted() == "\"hello\"")
     }
 
-    func testBackslash() {
-        XCTAssertEqual("a\\b".tmuxQuoted(), "\"a\\\\b\"")
+    @Test func backslash() {
+        #expect("a\\b".tmuxQuoted() == "\"a\\\\b\"")
     }
 
-    func testDoubleQuote() {
-        XCTAssertEqual("say \"hi\"".tmuxQuoted(), "\"say \\\"hi\\\"\"")
+    @Test func doubleQuote() {
+        #expect("say \"hi\"".tmuxQuoted() == "\"say \\\"hi\\\"\"")
     }
 
-    func testDollarSign() {
-        XCTAssertEqual("$HOME".tmuxQuoted(), "\"\\$HOME\"")
+    @Test func dollarSign() {
+        #expect("$HOME".tmuxQuoted() == "\"\\$HOME\"")
     }
 
-    func testNewline() {
-        XCTAssertEqual("line1\nline2".tmuxQuoted(), "\"line1\\nline2\"")
+    @Test func newline() {
+        #expect("line1\nline2".tmuxQuoted() == "\"line1\\nline2\"")
     }
 
-    func testCarriageReturn() {
-        XCTAssertEqual("a\rb".tmuxQuoted(), "\"a\\rb\"")
+    @Test func carriageReturn() {
+        #expect("a\rb".tmuxQuoted() == "\"a\\rb\"")
     }
 
-    func testTab() {
-        XCTAssertEqual("a\tb".tmuxQuoted(), "\"a\\tb\"")
+    @Test func tab() {
+        #expect("a\tb".tmuxQuoted() == "\"a\\tb\"")
     }
 
-    func testEscape() {
-        XCTAssertEqual("a\u{1B}b".tmuxQuoted(), "\"a\\eb\"")
+    @Test func escape() {
+        #expect("a\u{1B}b".tmuxQuoted() == "\"a\\eb\"")
     }
 
     // MARK: - Control Characters
 
-    func testNullByte() {
-        XCTAssertEqual("a\u{00}b".tmuxQuoted(), "\"a\\u0000b\"")
+    @Test func nullByte() {
+        #expect("a\u{00}b".tmuxQuoted() == "\"a\\u0000b\"")
     }
 
-    func testBellCharacter() {
-        XCTAssertEqual("a\u{07}b".tmuxQuoted(), "\"a\\u0007b\"")
+    @Test func bellCharacter() {
+        #expect("a\u{07}b".tmuxQuoted() == "\"a\\u0007b\"")
     }
 
-    func testDEL() {
-        XCTAssertEqual("a\u{7F}b".tmuxQuoted(), "\"a\\u007Fb\"")
+    @Test func del() {
+        #expect("a\u{7F}b".tmuxQuoted() == "\"a\\u007Fb\"")
     }
 
     // MARK: - Passthrough
 
-    func testUTF8Passthrough() {
-        XCTAssertEqual("한글テスト".tmuxQuoted(), "\"한글テスト\"")
+    @Test func utf8Passthrough() {
+        #expect("한글テスト".tmuxQuoted() == "\"한글テスト\"")
     }
 
-    func testHashNotEscaped() {
-        XCTAssertEqual("#{window}".tmuxQuoted(), "\"#{window}\"")
+    @Test func hashNotEscaped() {
+        #expect("#{window}".tmuxQuoted() == "\"#{window}\"")
     }
 
-    func testEmoji() {
-        XCTAssertEqual("hello 🌍".tmuxQuoted(), "\"hello 🌍\"")
+    @Test func emoji() {
+        #expect("hello 🌍".tmuxQuoted() == "\"hello 🌍\"")
     }
 
     // MARK: - Combined
 
-    func testMixedSpecialChars() {
+    @Test func mixedSpecialChars() {
         let input = "echo \"$PATH\"\nls -la"
         let expected = "\"echo \\\"\\$PATH\\\"\\nls -la\""
-        XCTAssertEqual(input.tmuxQuoted(), expected)
+        #expect(input.tmuxQuoted() == expected)
     }
 
-    func testEmptyString() {
-        XCTAssertEqual("".tmuxQuoted(), "\"\"")
+    @Test func emptyString() {
+        #expect("".tmuxQuoted() == "\"\"")
     }
 }

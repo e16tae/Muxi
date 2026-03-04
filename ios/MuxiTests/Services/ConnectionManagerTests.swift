@@ -260,7 +260,7 @@ final class ConnectionManagerTests: XCTestCase {
         ssh.mockExecResults["tmux list-sessions"] = "$0:test:1:0"
         let manager = ConnectionManager(sshService: ssh)
         _ = try await manager.connect(server: makeServer(), password: "p")
-        // State is .sessionList — fetchScrollback accepts this state.
+        manager.state = .attached(sessionName: "test")
 
         let fetchTask = Task {
             try await manager.fetchScrollback(paneId: "%0")
@@ -282,6 +282,7 @@ final class ConnectionManagerTests: XCTestCase {
         ssh.mockExecResults["tmux list-sessions"] = "$0:test:1:0"
         let manager = ConnectionManager(sshService: ssh)
         _ = try await manager.connect(server: makeServer(), password: "p")
+        manager.state = .attached(sessionName: "test")
 
         let fetchTask = Task {
             try await manager.fetchScrollback(paneId: "%0")
@@ -314,6 +315,7 @@ final class ConnectionManagerTests: XCTestCase {
         ssh.mockExecResults["tmux list-sessions"] = "$0:test:1:0"
         let manager = ConnectionManager(sshService: ssh)
         _ = try await manager.connect(server: makeServer(), password: "p")
+        manager.state = .attached(sessionName: "test")
 
         // Start first fetch but do not deliver response yet.
         let firstTask = Task {

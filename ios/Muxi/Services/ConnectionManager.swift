@@ -82,6 +82,12 @@ final class ConnectionManager {
     /// ``deliverScrollbackResponse(_:)``.
     private var scrollbackContinuation: CheckedContinuation<String, Error>?
 
+    /// Pane IDs currently in scrollback mode. Managed by TerminalSessionView.
+    var scrolledBackPanes: Set<String> = []
+
+    /// Panes that received new output while in scrollback mode.
+    var paneHasNewOutput: Set<String> = []
+
     /// Whether the last disconnect was caused by the app going to background.
     /// When true, `handleForeground()` will auto-reconnect.
     private(set) var disconnectedByBackground = false
@@ -183,6 +189,9 @@ final class ConnectionManager {
         cachedAuth = nil
         capturePaneQueue = []
         lastSentSize = (0, 0)
+
+        scrolledBackPanes = []
+        paneHasNewOutput = []
 
         // Cancel any pending scrollback fetch to avoid leaking the continuation.
         if let continuation = scrollbackContinuation {
@@ -456,14 +465,16 @@ final class ConnectionManager {
 
     /// Fetch scrollback history for a pane from tmux.
     ///
-    /// Sends `capture-pane -e -p -S -500` to fetch up to 500 lines of
-    /// history with ANSI color escapes. Returns the raw response string.
+    /// Sends `capture-pane -e -p -S -<lineCount>` to fetch history
+    /// with ANSI color escapes. Returns the raw response string.
     ///
-    /// - Parameter paneId: The tmux pane ID (e.g., "%0").
+    /// - Parameters:
+    ///   - paneId: The tmux pane ID (e.g., "%0").
+    ///   - lineCount: Number of lines of history to request (default 500).
     /// - Returns: The captured scrollback content with ANSI escapes.
-    func fetchScrollback(paneId: String) async throws -> String {
+    func fetchScrollback(paneId: String, lineCount: Int = 500) async throws -> String {
         switch state {
-        case .disconnected, .connecting, .reconnecting:
+        case .disconnected, .connecting, .reconnecting, .sessionList:
             throw ScrollbackError.notAttached
         case .attached:
             break
@@ -474,7 +485,7 @@ final class ConnectionManager {
 
         return try await withCheckedThrowingContinuation { continuation in
             scrollbackContinuation = continuation
-            let cmd = "capture-pane -e -p -S -500 -t \(paneId.shellEscaped())\n"
+            let cmd = "capture-pane -e -p -S -\(lineCount) -t \(paneId.shellEscaped())\n"
             Task {
                 do {
                     try await sshServiceForWrites.writeToChannel(Data(cmd.utf8))
@@ -549,6 +560,9 @@ final class ConnectionManager {
     private func wireCallbacks() {
         tmuxService.onPaneOutput = { [weak self] paneId, data in
             self?.paneBuffers[paneId]?.feedData(data)
+            if self?.scrolledBackPanes.contains(paneId) == true {
+                self?.paneHasNewOutput.insert(paneId)
+            }
         }
 
         tmuxService.onLayoutChange = { [weak self] windowId, panes in

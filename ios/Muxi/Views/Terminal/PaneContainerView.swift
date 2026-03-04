@@ -68,7 +68,6 @@ struct PaneContainerView: View {
     var scrollbackBuffer: TerminalBuffer?
     var scrollbackOffset: Int = 0
     var onScrollOffsetChanged: ((String, Int) -> Void)?
-    var onScrollbackNeeded: ((String) -> Void)?
     var showNewOutputIndicator: Bool = false
     var onReturnToLive: ((String) -> Void)?
 
@@ -133,9 +132,6 @@ struct PaneContainerView: View {
                     scrollOffset: scrollbackOffset,
                     onScrollOffsetChanged: { delta in
                         onScrollOffsetChanged?(pane.id, delta)
-                    },
-                    onScrollbackNeeded: {
-                        onScrollbackNeeded?(pane.id)
                     }
                 )
                 .overlay(alignment: .bottom) {
@@ -235,9 +231,6 @@ struct PaneContainerView: View {
                             scrollOffset: scrollbackOffset,
                             onScrollOffsetChanged: { delta in
                                 onScrollOffsetChanged?(pane.id, delta)
-                            },
-                            onScrollbackNeeded: {
-                                onScrollbackNeeded?(pane.id)
                             }
                         )
                             .frame(width: frame.width, height: frame.height)

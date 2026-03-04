@@ -183,6 +183,12 @@ final class ConnectionManager {
         cachedAuth = nil
         capturePaneQueue = []
         lastSentSize = (0, 0)
+
+        // Cancel any pending scrollback fetch to avoid leaking the continuation.
+        if let continuation = scrollbackContinuation {
+            scrollbackContinuation = nil
+            continuation.resume(throwing: ScrollbackError.notAttached)
+        }
     }
 
     // MARK: - App Lifecycle
@@ -459,7 +465,7 @@ final class ConnectionManager {
         switch state {
         case .disconnected, .connecting, .reconnecting:
             throw ScrollbackError.notAttached
-        case .sessionList, .attached:
+        case .attached:
             break
         }
         guard scrollbackContinuation == nil else {
@@ -470,8 +476,15 @@ final class ConnectionManager {
             scrollbackContinuation = continuation
             let cmd = "capture-pane -e -p -S -500 -t \(paneId.shellEscaped())\n"
             Task {
-                try? await sshServiceForWrites.writeToChannel(Data(cmd.utf8))
-                logger.info("Sent scrollback capture-pane for \(paneId)")
+                do {
+                    try await sshServiceForWrites.writeToChannel(Data(cmd.utf8))
+                    logger.info("Sent scrollback capture-pane for \(paneId)")
+                } catch {
+                    if let cont = self.scrollbackContinuation {
+                        self.scrollbackContinuation = nil
+                        cont.resume(throwing: error)
+                    }
+                }
             }
         }
     }

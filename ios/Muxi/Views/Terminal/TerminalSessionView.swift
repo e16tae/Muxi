@@ -65,9 +65,6 @@ struct TerminalSessionView: View {
                             onScrollOffsetChanged: { paneId, delta in
                                 handleScrollDelta(paneId: paneId, delta: delta)
                             },
-                            onScrollbackNeeded: { paneId in
-                                fetchScrollbackIfNeeded(paneId: paneId)
-                            },
                             showNewOutputIndicator: activePaneId.flatMap { hasNewOutput[$0] } ?? false,
                             onReturnToLive: { paneId in
                                 returnToLive(paneId: paneId)

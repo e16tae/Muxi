@@ -16,7 +16,6 @@ struct TerminalView: UIViewRepresentable {
     var scrollbackBuffer: TerminalBuffer?
     var scrollOffset: Int = 0
     var onScrollOffsetChanged: ((Int) -> Void)?
-    var onScrollbackNeeded: (() -> Void)?
 
     // MARK: - UIViewRepresentable
 
@@ -24,8 +23,7 @@ struct TerminalView: UIViewRepresentable {
         Coordinator(
             buffer: buffer, channel: channel, theme: theme,
             onPaste: onPaste,
-            onScrollOffsetChanged: onScrollOffsetChanged,
-            onScrollbackNeeded: onScrollbackNeeded
+            onScrollOffsetChanged: onScrollOffsetChanged
         )
     }
 
@@ -102,12 +100,12 @@ struct TerminalView: UIViewRepresentable {
         context.coordinator.onPaste = onPaste
 
         // Update scrollback state on renderer.
+        let offsetChanged = context.coordinator.renderer?.scrollOffset != scrollOffset
         context.coordinator.renderer?.scrollbackBuffer = scrollbackBuffer
         context.coordinator.renderer?.scrollOffset = scrollOffset
         context.coordinator.onScrollOffsetChanged = onScrollOffsetChanged
-        context.coordinator.onScrollbackNeeded = onScrollbackNeeded
 
-        if context.coordinator.renderer?.scrollOffset != scrollOffset {
+        if offsetChanged {
             context.coordinator.requestRedraw()
         }
 
@@ -155,20 +153,17 @@ struct TerminalView: UIViewRepresentable {
         var onPaste: ((String) -> Void)?
         var editMenuInteraction: UIEditMenuInteraction?
         var onScrollOffsetChanged: ((Int) -> Void)?
-        var onScrollbackNeeded: (() -> Void)?
         var cellHeight: CGFloat = 0
         private var accumulatedPanDelta: CGFloat = 0
 
         init(buffer: TerminalBuffer, channel: SSHChannel?, theme: Theme,
              onPaste: ((String) -> Void)?,
-             onScrollOffsetChanged: ((Int) -> Void)?,
-             onScrollbackNeeded: (() -> Void)?) {
+             onScrollOffsetChanged: ((Int) -> Void)?) {
             self.buffer = buffer
             self.channel = channel
             self.currentTheme = theme
             self.onPaste = onPaste
             self.onScrollOffsetChanged = onScrollOffsetChanged
-            self.onScrollbackNeeded = onScrollbackNeeded
         }
 
         /// Send text input to the SSH channel.

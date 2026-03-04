@@ -133,7 +133,7 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     NavigationLink {
-                        ThemeSettingsView(themeManager: themeManager)
+                        SettingsView(themeManager: themeManager)
                     } label: {
                         Image(systemName: "gearshape")
                     }

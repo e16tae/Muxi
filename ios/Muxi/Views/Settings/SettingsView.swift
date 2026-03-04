@@ -39,7 +39,9 @@ struct SettingsView: View {
                 Text("\(Int(themeManager.fontSize))pt")
                     .foregroundStyle(MuxiTokens.Colors.textSecondary)
                     .monospacedDigit()
-                Stepper("", value: fontSizeBinding, in: 10...24, step: 2)
+                Stepper("", value: fontSizeBinding,
+                        in: ThemeManager.minFontSize...ThemeManager.maxFontSize,
+                        step: ThemeManager.fontSizeStep)
                     .labelsHidden()
             }
             .listRowBackground(MuxiTokens.Colors.surfaceDefault)

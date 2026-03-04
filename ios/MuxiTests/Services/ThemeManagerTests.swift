@@ -83,4 +83,24 @@ struct ThemeManagerTests {
         let saved = UserDefaults.standard.double(forKey: "terminalFontSize")
         #expect(saved == 20)
     }
+
+    @Test("Font size restores from UserDefaults")
+    @MainActor func fontSizeRestores() {
+        defer {
+            UserDefaults.standard.removeObject(forKey: "terminalFontSize")
+        }
+        UserDefaults.standard.set(Double(20), forKey: "terminalFontSize")
+        let manager = ThemeManager()
+        #expect(manager.fontSize == 20)
+    }
+
+    @Test("Font size clamps on restore from UserDefaults")
+    @MainActor func fontSizeRestoreClamps() {
+        defer {
+            UserDefaults.standard.removeObject(forKey: "terminalFontSize")
+        }
+        UserDefaults.standard.set(Double(50), forKey: "terminalFontSize")
+        let manager = ThemeManager()
+        #expect(manager.fontSize == 24)
+    }
 }

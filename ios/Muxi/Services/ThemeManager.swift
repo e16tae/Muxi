@@ -19,10 +19,10 @@ final class ThemeManager {
 
     private let selectedThemeKey = "selectedThemeId"
     private let fontSizeKey = "terminalFontSize"
-    private static let defaultFontSize: CGFloat = 14
-    private static let minFontSize: CGFloat = 10
-    private static let maxFontSize: CGFloat = 24
-    private static let fontSizeStep: CGFloat = 2
+    static let defaultFontSize: CGFloat = 14
+    static let minFontSize: CGFloat = 10
+    static let maxFontSize: CGFloat = 24
+    static let fontSizeStep: CGFloat = 2
 
     /// Terminal font size in points. Persisted via UserDefaults.
     private(set) var fontSize: CGFloat = defaultFontSize

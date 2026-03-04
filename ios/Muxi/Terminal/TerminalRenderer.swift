@@ -84,6 +84,13 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     var buffer: TerminalBuffer?
     var needsRedraw: Bool = true
 
+    // MARK: - Scrollback
+
+    /// When set, the renderer reads from this buffer instead of the live buffer.
+    var scrollbackBuffer: TerminalBuffer?
+    /// Number of lines scrolled back from the bottom. 0 = live mode.
+    var scrollOffset: Int = 0
+
     // MARK: - Init
 
     init?(device: MTLDevice, font: UIFont, theme: Theme) {
@@ -309,24 +316,39 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     // MARK: - Vertex Buffer
 
     func rebuildVertices() {
-        guard let buffer = buffer else { return }
+        // Determine source buffer and row range.
+        let isScrollback = scrollOffset > 0 && scrollbackBuffer != nil
+        let source: TerminalBuffer
+        let rowRange: Range<Int>
 
-        let rows = buffer.rows
-        let cols = buffer.cols
+        if isScrollback, let sb = scrollbackBuffer, let live = buffer {
+            source = sb
+            let visibleRows = live.rows
+            let start = ScrollbackState.startRow(
+                offset: scrollOffset, totalLines: sb.rows, visibleRows: visibleRows
+            )
+            let end = min(sb.rows, start + visibleRows)
+            rowRange = start..<end
+        } else {
+            guard let buf = buffer else { return }
+            source = buf
+            rowRange = 0..<buf.rows
+        }
+
+        let cols = source.cols
         let spaceUV = glyphUVs[" "] ?? GlyphUV(u: 0, v: 0, uMax: 0, vMax: 0, cellSpan: 1)
 
         var vertices: [CellVertex] = []
-        vertices.reserveCapacity(rows * cols * 6)
+        vertices.reserveCapacity(rowRange.count * cols * 6)
 
         let cw = Float(cellWidth)
         let ch = Float(cellHeight)
 
         // First pass: ensure all glyphs are in the atlas.
         var newGlyphs = false
-        for row in 0..<rows {
+        for row in rowRange {
             for col in 0..<cols {
-                let cell = buffer.cellAt(row: row, col: col)
-                // Skip continuation cells (second half of wide characters).
+                let cell = source.cellAt(row: row, col: col)
                 if cell.width == 0 { continue }
                 if cell.character != " " && glyphUVs[cell.character] == nil {
                     ensureGlyph(cell.character)
@@ -339,12 +361,12 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         }
 
         // Second pass: build vertex data.
-        for row in 0..<rows {
-            for col in 0..<cols {
-                let cell = buffer.cellAt(row: row, col: col)
+        for row in rowRange {
+            // Map source row to screen row (0-based for vertex positioning).
+            let screenRow = row - rowRange.lowerBound
 
-                // Skip continuation cells — the wide character's quad
-                // already covers this column.
+            for col in 0..<cols {
+                let cell = source.cellAt(row: row, col: col)
                 if cell.width == 0 { continue }
 
                 var fgTermColor = cell.fgColor
@@ -369,19 +391,18 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                     1.0
                 )
 
-                // Block cursor: invert fg/bg at cursor position.
-                if row == buffer.cursorRow && col == buffer.cursorCol {
+                // Block cursor: only show in live mode.
+                if !isScrollback,
+                   row == source.cursorRow && col == source.cursorCol {
                     swap(&fg, &bg)
                 }
 
                 let uv = glyphUVs[cell.character] ?? spaceUV
-
-                // Use the cell's width from the VT parser for quad sizing.
                 let cellSpan = Int(cell.width)
                 let quadWidth = cw * Float(cellSpan)
 
                 let x0 = Float(col) * cw
-                let y0 = Float(row) * ch
+                let y0 = Float(screenRow) * ch
                 let x1 = x0 + quadWidth
                 let y1 = y0 + ch
 

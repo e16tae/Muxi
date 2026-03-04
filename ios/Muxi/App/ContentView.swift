@@ -10,7 +10,7 @@ import SwiftUI
 ///                                                           + ReconnectingOverlay
 /// ```
 struct ContentView: View {
-    @State private var connectionManager = ConnectionManager()
+    @Environment(ConnectionManager.self) private var connectionManager
     @State private var themeManager = ThemeManager()
     @State private var errorMessage: String?
     @State private var showErrorBanner = false
@@ -260,4 +260,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .environment(ConnectionManager())
 }

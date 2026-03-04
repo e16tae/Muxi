@@ -262,15 +262,20 @@ struct TerminalSessionView: View {
                     return
                 }
 
-                let lines = response.components(separatedBy: "\n")
+                // capture-pane output ends with a trailing newline; drop the
+                // resulting empty element so the buffer isn't oversized by 1.
+                var lines = response.components(separatedBy: "\n")
+                if lines.last?.isEmpty == true { lines.removeLast() }
+
                 let liveBuffer = connectionManager.paneBuffers[paneId]
                 let cols = liveBuffer?.cols ?? 80
-                let cacheBuffer = TerminalBuffer(cols: cols, rows: lines.count)
+                let totalLines = lines.count
+                let cacheBuffer = TerminalBuffer(cols: cols, rows: totalLines)
                 cacheBuffer.feed(response)
 
                 scrollbackCaches[paneId] = cacheBuffer
                 scrollbackState[paneId] = .scrolling(
-                    offset: 1, totalLines: lines.count
+                    offset: 1, totalLines: totalLines
                 )
                 hasNewOutput[paneId] = false
             } catch {

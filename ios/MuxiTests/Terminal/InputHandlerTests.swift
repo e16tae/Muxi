@@ -237,4 +237,49 @@ final class InputHandlerTests: XCTestCase {
         XCTAssertEqual(data, expected)
         XCTAssertFalse(handler.altActive, "Alt should auto-deactivate after CJK character")
     }
+
+    // MARK: - Hardware Keyboard (terminalData)
+
+    func testTerminalDataCtrlA() {
+        let data = InputHandler.terminalData(for: "a", ctrl: true)
+        XCTAssertEqual(data, Data([0x01]))
+    }
+
+    func testTerminalDataCtrlC() {
+        let data = InputHandler.terminalData(for: "c", ctrl: true)
+        XCTAssertEqual(data, Data([0x03]))
+    }
+
+    func testTerminalDataCtrlZ() {
+        let data = InputHandler.terminalData(for: "z", ctrl: true)
+        XCTAssertEqual(data, Data([0x1A]))
+    }
+
+    func testTerminalDataCtrlUppercaseLetter() {
+        let data = InputHandler.terminalData(for: "C", ctrl: true)
+        XCTAssertEqual(data, Data([0x03]))
+    }
+
+    func testTerminalDataAltA() {
+        let data = InputHandler.terminalData(for: "a", alt: true)
+        XCTAssertEqual(data, Data([0x1B, 0x61]))
+    }
+
+    func testTerminalDataAltZ() {
+        let data = InputHandler.terminalData(for: "z", alt: true)
+        XCTAssertEqual(data, Data([0x1B, 0x7A]))
+    }
+
+    func testTerminalDataPlainCharacter() {
+        let data = InputHandler.terminalData(for: "x")
+        XCTAssertEqual(data, "x".data(using: .utf8))
+    }
+
+    func testTerminalDataDoesNotAffectToggleState() {
+        XCTAssertFalse(handler.ctrlActive)
+        XCTAssertFalse(handler.altActive)
+        _ = InputHandler.terminalData(for: "a", ctrl: true)
+        XCTAssertFalse(handler.ctrlActive)
+        XCTAssertFalse(handler.altActive)
+    }
 }

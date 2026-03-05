@@ -118,4 +118,40 @@ final class InputHandler {
     func toggleAlt() {
         altActive.toggle()
     }
+
+    // MARK: - Hardware Keyboard Support
+
+    /// Translate a character with explicit modifier flags into terminal bytes.
+    ///
+    /// This is a **static pure function** — it does not read or modify the
+    /// instance-level `ctrlActive`/`altActive` toggle state.  Use this for
+    /// hardware keyboard events where modifier flags come from `UIKeyCommand`.
+    ///
+    /// - Parameters:
+    ///   - character: The key's `charactersIgnoringModifiers` value.
+    ///   - ctrl: Whether the Control modifier is held.
+    ///   - alt: Whether the Option/Alt modifier is held.
+    /// - Returns: Terminal byte sequence as `Data`.
+    static func terminalData(
+        for character: String,
+        ctrl: Bool = false,
+        alt: Bool = false
+    ) -> Data {
+        guard let first = character.first else { return Data() }
+
+        if ctrl {
+            if let upper = first.uppercased().first,
+               let ascii = upper.asciiValue, ascii >= 0x40, ascii <= 0x5F {
+                return Data([ascii - 0x40])
+            }
+        }
+
+        let charData = character.data(using: .utf8) ?? Data()
+
+        if alt {
+            return Data([0x1B]) + charData
+        }
+
+        return charData
+    }
 }

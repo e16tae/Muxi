@@ -282,4 +282,19 @@ final class InputHandlerTests: XCTestCase {
         XCTAssertFalse(handler.ctrlActive)
         XCTAssertFalse(handler.altActive)
     }
+
+    func testTerminalDataCtrlNonLetterFallsThrough() {
+        let data = InputHandler.terminalData(for: "3", ctrl: true)
+        XCTAssertEqual(data, "3".data(using: .utf8))
+    }
+
+    func testTerminalDataCtrlAndAltLetterCtrlWins() {
+        let data = InputHandler.terminalData(for: "c", ctrl: true, alt: true)
+        XCTAssertEqual(data, Data([0x03]))
+    }
+
+    func testTerminalDataCtrlAndAltNonLetterAltApplied() {
+        let data = InputHandler.terminalData(for: "3", ctrl: true, alt: true)
+        XCTAssertEqual(data, Data([0x1B]) + "3".data(using: .utf8)!)
+    }
 }

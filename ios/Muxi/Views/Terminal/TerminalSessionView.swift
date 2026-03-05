@@ -92,6 +92,13 @@ struct TerminalSessionView: View {
                     onDelete: {
                         sendToActivePane(Data([0x7F]))
                     },
+                    onSpecialKey: { key in
+                        let data = inputHandler.data(for: key)
+                        sendToActivePane(data)
+                    },
+                    onRawData: { data in
+                        sendToActivePane(data)
+                    },
                     isActive: $isKeyboardActive
                 )
                 .frame(width: 0, height: 0)

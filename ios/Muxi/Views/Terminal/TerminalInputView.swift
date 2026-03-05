@@ -15,6 +15,12 @@ final class TerminalInputAccessor: UIView, UIKeyInput {
     /// Called when the user taps backspace.
     var onDelete: (() -> Void)?
 
+    /// Called for special keys (arrows, escape, tab) from hardware keyboard.
+    var onSpecialKey: ((SpecialKey) -> Void)?
+
+    /// Called for raw terminal bytes (Ctrl/Alt combos) from hardware keyboard.
+    var onRawData: ((Data) -> Void)?
+
     // MARK: - First Responder
 
     override var canBecomeFirstResponder: Bool { true }
@@ -55,6 +61,83 @@ final class TerminalInputAccessor: UIView, UIKeyInput {
             resignFirstResponder()
         }
     }
+
+    // MARK: - Hardware Keyboard
+
+    /// Cached key commands for hardware keyboard support.
+    /// Arrows, Escape, Tab, Ctrl+a...z, Alt+a...z (~58 entries).
+    private static let _keyCommands: [UIKeyCommand] = {
+        var commands: [UIKeyCommand] = []
+        let sel = #selector(handleKeyCommand(_:))
+
+        // Arrow keys.
+        commands.append(UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: sel))
+        commands.append(UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: sel))
+        commands.append(UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: sel))
+        commands.append(UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: sel))
+
+        // Escape.
+        commands.append(UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: sel))
+
+        // Tab — override iOS focus navigation.
+        let tab = UIKeyCommand(input: "\t", modifierFlags: [], action: sel)
+        tab.wantsPriorityOverSystemBehavior = true
+        commands.append(tab)
+
+        // Ctrl+letter (a-z).
+        for scalar in UnicodeScalar("a").value...UnicodeScalar("z").value {
+            let char = String(UnicodeScalar(scalar)!)
+            commands.append(UIKeyCommand(input: char, modifierFlags: .control, action: sel))
+        }
+
+        // Alt+letter (a-z).
+        for scalar in UnicodeScalar("a").value...UnicodeScalar("z").value {
+            let char = String(UnicodeScalar(scalar)!)
+            commands.append(UIKeyCommand(input: char, modifierFlags: .alternate, action: sel))
+        }
+
+        return commands
+    }()
+
+    override var keyCommands: [UIKeyCommand]? {
+        Self._keyCommands
+    }
+
+    @objc private func handleKeyCommand(_ command: UIKeyCommand) {
+        guard let input = command.input else { return }
+
+        // Special keys (no modifier).
+        if command.modifierFlags.isEmpty || command.modifierFlags == .numericPad {
+            let specialKey: SpecialKey?
+            switch input {
+            case UIKeyCommand.inputUpArrow:    specialKey = .arrowUp
+            case UIKeyCommand.inputDownArrow:  specialKey = .arrowDown
+            case UIKeyCommand.inputLeftArrow:  specialKey = .arrowLeft
+            case UIKeyCommand.inputRightArrow: specialKey = .arrowRight
+            case UIKeyCommand.inputEscape:     specialKey = .escape
+            case "\t":                         specialKey = .tab
+            default:                           specialKey = nil
+            }
+            if let key = specialKey {
+                onSpecialKey?(key)
+                return
+            }
+        }
+
+        // Ctrl+letter.
+        if command.modifierFlags.contains(.control) {
+            let data = InputHandler.terminalData(for: input, ctrl: true)
+            onRawData?(data)
+            return
+        }
+
+        // Alt+letter.
+        if command.modifierFlags.contains(.alternate) {
+            let data = InputHandler.terminalData(for: input, alt: true)
+            onRawData?(data)
+            return
+        }
+    }
 }
 
 // MARK: - TerminalInputView
@@ -67,6 +150,8 @@ final class TerminalInputAccessor: UIView, UIKeyInput {
 struct TerminalInputView: UIViewRepresentable {
     var onText: (String) -> Void
     var onDelete: () -> Void
+    var onSpecialKey: ((SpecialKey) -> Void)?
+    var onRawData: ((Data) -> Void)?
     @Binding var isActive: Bool
 
     func makeCoordinator() -> Coordinator {
@@ -78,6 +163,8 @@ struct TerminalInputView: UIViewRepresentable {
         view.translatesAutoresizingMaskIntoConstraints = false
         view.onText = onText
         view.onDelete = onDelete
+        view.onSpecialKey = onSpecialKey
+        view.onRawData = onRawData
         context.coordinator.inputView = view
 
         // Zero size — invisible, doesn't affect layout.
@@ -93,6 +180,8 @@ struct TerminalInputView: UIViewRepresentable {
     func updateUIView(_ uiView: TerminalInputAccessor, context: Context) {
         uiView.onText = onText
         uiView.onDelete = onDelete
+        uiView.onSpecialKey = onSpecialKey
+        uiView.onRawData = onRawData
 
         // Only change responder state when binding diverges from UIKit reality.
         if isActive != uiView.isFirstResponder {

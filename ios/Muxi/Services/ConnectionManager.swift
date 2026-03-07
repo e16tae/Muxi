@@ -195,7 +195,7 @@ final class ConnectionManager {
                 logger.info("Attaching to first session: \(targetSession)")
             } else {
                 // No sessions exist — create one
-                _ = try await sshService.execCommand("tmux new-session -d -s main")
+                _ = try await sshService.execCommand("tmux new-session -d -s \("main".shellEscaped())")
                 targetSession = "main"
                 logger.info("Created new session: main")
                 // Refresh to populate sessions array
@@ -368,6 +368,7 @@ final class ConnectionManager {
     /// `tmux -CC attach -t <name>` and pipes output through
     /// ``TmuxControlService/feed(_:)``.
     func attachSession(_ session: TmuxSession) async throws {
+        guard state != .disconnected else { return }
         await detachTask?.value
         detachTask = nil
         try await performAttach(sessionName: session.name)
@@ -385,6 +386,12 @@ final class ConnectionManager {
     /// Closes the current control mode channel and reattaches to the new session.
     func switchSession(to sessionName: String) async throws {
         guard case .attached = state else { return }
+
+        // Cancel any pending scrollback fetch to avoid leaking the continuation.
+        if let continuation = scrollbackContinuation {
+            scrollbackContinuation = nil
+            continuation.resume(throwing: ScrollbackError.notAttached)
+        }
 
         // Clean up current session
         sshMonitorTask?.cancel()

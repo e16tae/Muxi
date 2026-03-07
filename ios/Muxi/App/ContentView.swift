@@ -6,8 +6,8 @@ import SwiftUI
 /// ensuring the UI always reflects the true connection state:
 ///
 /// ```
-/// ServerListView  ->  (connecting)  ->  SessionListView  ->  TerminalSessionView
-///                                                           + ReconnectingOverlay
+/// ServerListView  ->  (connecting)  ->  TerminalSessionView
+///                                       + ReconnectingOverlay
 /// ```
 struct ContentView: View {
     @Environment(ConnectionManager.self) private var connectionManager
@@ -18,11 +18,13 @@ struct ContentView: View {
     @State private var passwordPrompt: String = ""
     @State private var showingPasswordPrompt = false
     @State private var previousAttachedSession: String?
-    @State private var sessionListViewModel: SessionListViewModel?
     @State private var tmuxGuideReason: TmuxInstallGuideView.Reason?
 
     var body: some View {
         ZStack {
+            MuxiTokens.Colors.surfaceBase
+                .ignoresSafeArea()
+
             switch connectionManager.state {
             case .disconnected:
                 serverListNavigation
@@ -32,9 +34,6 @@ struct ContentView: View {
                     .overlay {
                         connectingOverlay
                     }
-
-            case .sessionList:
-                sessionListNavigation
 
             case .attached(let sessionName):
                 TerminalSessionView(
@@ -62,7 +61,6 @@ struct ContentView: View {
                     onCancel: {
                         connectionManager.disconnect()
                         previousAttachedSession = nil
-                        sessionListViewModel = nil
                     }
                 )
             }
@@ -171,33 +169,6 @@ struct ContentView: View {
         }
     }
 
-    // MARK: - Session List
-
-    @ViewBuilder
-    private var sessionListNavigation: some View {
-        NavigationStack {
-            if let viewModel = sessionListViewModel {
-                SessionListView(viewModel: viewModel)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button("Disconnect") {
-                                connectionManager.disconnect()
-                                previousAttachedSession = nil
-                                sessionListViewModel = nil
-                            }
-                        }
-                    }
-            }
-        }
-        .onAppear {
-            if sessionListViewModel == nil {
-                sessionListViewModel = SessionListViewModel(
-                    connectionManager: connectionManager
-                )
-            }
-        }
-    }
-
     // MARK: - Connection Logic
 
     /// Handle a server row tap. If the server uses password auth, prompt for
@@ -253,7 +224,7 @@ struct ContentView: View {
     private func connectToServer(_ server: Server, password: String? = nil) {
         Task {
             do {
-                _ = try await connectionManager.connect(
+                try await connectionManager.connect(
                     server: server,
                     password: password
                 )

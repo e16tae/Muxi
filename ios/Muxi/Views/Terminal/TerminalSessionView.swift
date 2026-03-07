@@ -101,7 +101,8 @@ struct TerminalSessionView: View {
                     },
                     isActive: $isKeyboardActive
                 )
-                .frame(width: 0, height: 0)
+                .frame(width: 1, height: 1)
+                .opacity(0)
 
                 ExtendedKeyboardView(
                     theme: themeManager.currentTheme,

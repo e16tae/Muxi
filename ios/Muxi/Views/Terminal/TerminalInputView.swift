@@ -159,18 +159,19 @@ struct TerminalInputView: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> TerminalInputAccessor {
-        let view = TerminalInputAccessor(frame: .zero)
+        let view = TerminalInputAccessor(frame: CGRect(x: 0, y: 0, width: 1, height: 1))
         view.translatesAutoresizingMaskIntoConstraints = false
+        view.alpha = 0
         view.onText = onText
         view.onDelete = onDelete
         view.onSpecialKey = onSpecialKey
         view.onRawData = onRawData
         context.coordinator.inputView = view
 
-        // Zero size — invisible, doesn't affect layout.
+        // 1×1pt invisible — iOS 26 requires non-zero frame for first responder.
         NSLayoutConstraint.activate([
-            view.widthAnchor.constraint(equalToConstant: 0),
-            view.heightAnchor.constraint(equalToConstant: 0),
+            view.widthAnchor.constraint(equalToConstant: 1),
+            view.heightAnchor.constraint(equalToConstant: 1),
         ])
 
         context.coordinator.startObservingKeyboard()

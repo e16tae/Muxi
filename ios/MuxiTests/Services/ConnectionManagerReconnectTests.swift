@@ -56,6 +56,8 @@ final class ReconnectMockSSHService: SSHServiceProtocol {
     func writeToChannel(_ data: Data) async throws {
         guard state == .connected else { throw SSHError.notConnected }
     }
+
+    func closeShell() async {}
 }
 
 // MARK: - ConnectionManagerReconnectTests

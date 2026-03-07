@@ -257,7 +257,13 @@ struct ContentView: View {
                     server: server,
                     password: password
                 )
-                // On success the state transitions to .sessionList automatically.
+                // Save password to Keychain on successful connection so the
+                // user isn't prompted again next time.
+                if let password, server.authMethod == .password {
+                    try? KeychainService().savePassword(
+                        password, account: server.id.uuidString
+                    )
+                }
             } catch let error as TmuxError {
                 switch error {
                 case .notInstalled:

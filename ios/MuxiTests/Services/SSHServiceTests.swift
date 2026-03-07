@@ -134,6 +134,8 @@ class MockSSHService: SSHServiceProtocol {
         guard state == .connected else { throw SSHError.notConnected }
     }
 
+    func closeShell() async {}
+
     // MARK: Test Helpers
 
     func simulateConnect() { state = .connected }

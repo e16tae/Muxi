@@ -73,6 +73,7 @@ final class ConnectionManager {
 
     /// Monitors SSH connection health and triggers reconnect on drop.
     private var sshMonitorTask: Task<Void, Never>?
+    private var detachTask: Task<Void, Never>?
 
     /// Cached credentials from the last successful ``connect(server:password:)``
     /// call, reused by ``reconnect()`` so we do not need to hit the Keychain
@@ -83,6 +84,11 @@ final class ConnectionManager {
     /// Each ``capture-pane -e -p -t %<id>`` triggers a %begin/%end block;
     /// responses are matched to panes in FIFO order.
     private var capturePaneQueue: [String] = []
+
+    /// When `true`, layout-change callbacks skip ``capture-pane`` for new
+    /// panes. Set at attach time and cleared by the first real resize from
+    /// the GeometryReader so we don't capture at the placeholder 80×24 size.
+    private var pendingInitialResize = false
 
     /// Continuation waiting for a scrollback `capture-pane` response.
     /// Set by ``fetchScrollback(paneId:)`` and resumed by
@@ -196,6 +202,7 @@ final class ConnectionManager {
         cachedAuth = nil
         capturePaneQueue = []
         lastSentSize = (0, 0)
+        pendingInitialResize = false
 
         scrolledBackPanes = []
         paneHasNewOutput = []
@@ -293,6 +300,14 @@ final class ConnectionManager {
     /// `tmux -CC attach -t <name>` and pipes output through
     /// ``TmuxControlService/feed(_:)``.
     func attachSession(_ session: TmuxSession) async throws {
+        // Wait for any in-flight detach to finish before opening a new
+        // shell.  Without this, the detach Task could write "detach\n"
+        // to the NEW channel, immediately detaching the new session.
+        logger.info("attachSession: waiting for detachTask...")
+        await detachTask?.value
+        detachTask = nil
+        logger.info("attachSession: detachTask done, SSH state=\(String(describing: self.sshService.state))")
+
         guard state == .sessionList else {
             logger.warning("attachSession called but state is not .sessionList (state=\(String(describing: self.state)))")
             return
@@ -323,6 +338,7 @@ final class ConnectionManager {
         // Send a small initial size to trigger %layout-change.
         // The TerminalSessionView will send the correct size once
         // it knows its actual dimensions via GeometryReader.
+        pendingInitialResize = true
         let refreshCmd = "refresh-client -C 80,24\n"
         try await sshService.writeToChannel(Data(refreshCmd.utf8))
         logger.info("Sent initial refresh-client, awaiting view-based resize")
@@ -344,18 +360,36 @@ final class ConnectionManager {
     }
 
     /// Detach from the current tmux session, returning to the session list.
+    ///
+    /// Closes the SSH shell channel, which causes tmux to detach the
+    /// session (standard tmux behavior on client disconnect). The tmux
+    /// session stays alive and can be re-attached.
+    ///
+    /// We intentionally do NOT send "detach\n" before closing, because
+    /// that creates a race: tmux closes the channel in response, the
+    /// readTask sees EOF and sets SSH state to `.disconnected` before
+    /// `closeShell()` can cancel it, causing subsequent `startShell()`
+    /// calls to fail. Closing the channel directly ensures the readTask
+    /// is always cancelled first.
     func detach() {
         sshMonitorTask?.cancel()
         sshMonitorTask = nil
-        // Send detach command if channel is active (actor-routed).
-        Task {
-            try? await sshService.writeToChannel(Data("detach\n".utf8))
-        }
-        activeChannel = nil  // Don't close — SSHService owns the channel lifecycle
+
+        activeChannel = nil
         tmuxService.resetLineBuffer()
         paneBuffers = [:]
         currentPanes = []
+        lastSentSize = (0, 0)
         state = .sessionList
+
+        // Close the shell channel — tmux detaches the session when the
+        // control-mode client disconnects. Stored in detachTask so
+        // attachSession() can await completion before opening a new shell.
+        detachTask = Task { [weak self] in
+            self?.logger.info("detachTask: closing shell...")
+            await self?.sshService.closeShell()
+            self?.logger.info("detachTask: shell closed, SSH state=\(String(describing: self?.sshService.state))")
+        }
     }
 
     // MARK: - Terminal Resize
@@ -370,6 +404,7 @@ final class ConnectionManager {
         guard cols > 0, rows > 0 else { return }
         guard (cols, rows) != lastSentSize else { return }
         lastSentSize = (cols, rows)
+        pendingInitialResize = false
         logger.info("Resizing terminal to \(cols)x\(rows)")
         let cmd = "refresh-client -C \(cols),\(rows)\n"
         Task {
@@ -596,16 +631,25 @@ final class ConnectionManager {
             for key in self.paneBuffers.keys where !activePaneIds.contains(key) {
                 self.paneBuffers.removeValue(forKey: key)
             }
-            // Request initial screen content for newly created panes.
-            // capture-pane -e includes ANSI escapes, -p prints to stdout
-            // which tmux returns inside a %begin/%end block.
-            for paneId in newPaneIds {
-                self.capturePaneQueue.append(paneId)
-                let cmd = "capture-pane -e -p -t \(paneId.shellEscaped())\n"
-                Task {
-                    try? await self.sshServiceForWrites.writeToChannel(Data(cmd.utf8))
-                    self.logger.info("Sent capture-pane for \(paneId)")
+            // Request initial screen content for newly created panes —
+            // but NOT during the initial attach sequence.  The first
+            // layout-change arrives at the placeholder 80×24 size before
+            // the view has measured its real dimensions; capturing at this
+            // size fills the buffer with a prompt that becomes stale once
+            // the real resize triggers a SIGWINCH redraw, producing a
+            // visible "double prompt."  The flag is cleared by the first
+            // resizeTerminal() call from the GeometryReader.
+            if !self.pendingInitialResize {
+                for paneId in newPaneIds {
+                    self.capturePaneQueue.append(paneId)
+                    let cmd = "capture-pane -e -p -t \(paneId.shellEscaped())\n"
+                    Task {
+                        try? await self.sshServiceForWrites.writeToChannel(Data(cmd.utf8))
+                        self.logger.info("Sent capture-pane for \(paneId)")
+                    }
                 }
+            } else {
+                self.logger.info("Skipping capture-pane for \(newPaneIds) — pending initial resize")
             }
         }
 

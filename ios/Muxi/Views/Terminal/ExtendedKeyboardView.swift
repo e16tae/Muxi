@@ -19,6 +19,7 @@ struct ExtendedKeyboardView: View {
     // MARK: - Body
 
     var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
         HStack(spacing: MuxiTokens.Spacing.sm) {
             // Immediate keys
             keyButton("Esc") { send(key: .escape) }
@@ -64,6 +65,7 @@ struct ExtendedKeyboardView: View {
         }
         .padding(.horizontal, MuxiTokens.Spacing.sm)
         .padding(.vertical, MuxiTokens.Spacing.xs)
+        }
         .frame(height: 44)
         .background(theme.background.color)
     }

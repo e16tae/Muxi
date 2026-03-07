@@ -105,6 +105,10 @@ protocol SSHServiceProtocol: AnyObject {
     /// directly from a different isolation context. All channel I/O goes
     /// through the actor to avoid concurrent libssh2 access.
     func writeToChannel(_ data: Data) async throws
+
+    /// Close the active shell channel and stop the read loop without
+    /// tearing down the underlying SSH session.
+    func closeShell() async
 }
 
 // MARK: - LibSSH2Channel
@@ -458,6 +462,19 @@ actor SSHService: SSHServiceProtocol {
             throw SSHError.notConnected
         }
 
+        // Clean up any previous shell channel before opening a new one.
+        // This prevents orphaned read loops when detach() hasn't finished
+        // its background cleanup before the user re-attaches.
+        if readTask != nil || activeShellChannel != nil {
+            readTask?.cancel()
+            await readTask?.value
+            readTask = nil
+            activeShellChannel?.close()
+            activeShellChannel = nil
+            // Ensure blocking mode for channel open below.
+            libssh2_session_set_blocking(sess, 1)
+        }
+
         // Open a session channel for the interactive shell.
         guard let channel = libssh2_channel_open_ex(
             sess, "session", 7,
@@ -546,6 +563,7 @@ actor SSHService: SSHServiceProtocol {
             }
 
             // Restore blocking mode so subsequent cleanup calls succeed.
+            sshLog.info("readTask exiting: cancelled=\(Task.isCancelled)")
             if let self = self {
                 let sess = await self.session
                 if let sess {
@@ -554,13 +572,42 @@ actor SSHService: SSHServiceProtocol {
                 // Signal that the connection dropped so observers can
                 // trigger reconnection (but not on intentional cancel).
                 if !Task.isCancelled {
+                    sshLog.info("readTask: setting state to .disconnected (unexpected EOF)")
                     await self.updateState(.disconnected)
+                } else {
+                    let currentState = await self.state
+                    sshLog.info("readTask: cancelled, keeping state=\(String(describing: currentState))")
                 }
             }
         }
 
         self.activeShellChannel = sshChannel
         return sshChannel
+    }
+
+    // MARK: - Close Shell (Keep SSH Session)
+
+    /// Close the active shell channel and stop the read loop without
+    /// tearing down the underlying SSH session. Used after tmux detach
+    /// so the same SSH connection can open a new shell for re-attach.
+    func closeShell() async {
+        sshLog.info("closeShell: cancelling readTask (exists=\(self.readTask != nil))...")
+        readTask?.cancel()
+        // Await is safe here — Swift actor reentrancy allows the readTask
+        // to complete on this actor while we suspend.  The readTask skips
+        // updateState(.disconnected) when cancelled, so no state corruption.
+        sshLog.info("closeShell: awaiting readTask completion...")
+        await readTask?.value
+        sshLog.info("closeShell: readTask done")
+        readTask = nil
+        activeShellChannel?.close()
+        activeShellChannel = nil
+        // Restore blocking mode so the next startShell() can open a
+        // channel synchronously via libssh2_channel_open_ex.
+        if let sess = session {
+            libssh2_session_set_blocking(sess, 1)
+        }
+        sshLog.info("closeShell: complete, state=\(String(describing: self.state))")
     }
 
     // MARK: - Channel Write (Actor-Isolated)

@@ -36,9 +36,9 @@ struct QuickActionModelTests {
         #expect(ids.count == uniqueIDs.count, "All action IDs should be unique")
     }
 
-    @Test("Total predefined action count is 15")
+    @Test("Total predefined action count is 11")
     func totalActionCount() {
-        #expect(QuickAction.allActions.count == 15)
+        #expect(QuickAction.allActions.count == 11)
     }
 }
 
@@ -59,12 +59,6 @@ struct QuickActionCategoryTests {
         #expect(window.count == 5)
     }
 
-    @Test("Session actions count is 4")
-    func sessionActionCount() {
-        let session = QuickAction.actions(for: .session)
-        #expect(session.count == 4)
-    }
-
     @Test("Pane actions all have pane category")
     func paneActionsCorrectCategory() {
         for action in QuickAction.paneActions {
@@ -79,23 +73,15 @@ struct QuickActionCategoryTests {
         }
     }
 
-    @Test("Session actions all have session category")
-    func sessionActionsCorrectCategory() {
-        for action in QuickAction.sessionActions {
-            #expect(action.category == .session)
-        }
-    }
-
-    @Test("Category allCases has three entries")
+    @Test("Category allCases has two entries")
     func categoryAllCases() {
-        #expect(QuickAction.Category.allCases.count == 3)
+        #expect(QuickAction.Category.allCases.count == 2)
     }
 
     @Test("Category raw values match expected strings")
     func categoryRawValues() {
         #expect(QuickAction.Category.pane.rawValue == "Pane")
         #expect(QuickAction.Category.window.rawValue == "Window")
-        #expect(QuickAction.Category.session.rawValue == "Session")
     }
 
     @Test("actions(for:) returns same result as static arrays")
@@ -105,9 +91,6 @@ struct QuickActionCategoryTests {
         )
         #expect(
             QuickAction.actions(for: .window).map(\.title) == QuickAction.windowActions.map(\.title)
-        )
-        #expect(
-            QuickAction.actions(for: .session).map(\.title) == QuickAction.sessionActions.map(\.title)
         )
     }
 }
@@ -173,19 +156,6 @@ struct QuickActionCommandTests {
         #expect(action?.command == "kill-window")
     }
 
-    @Test("New session command is correct")
-    func newSession() {
-        let action = QuickAction.sessionActions.first { $0.title == "New Session" }
-        #expect(action != nil)
-        #expect(action?.command == "new-session -d")
-    }
-
-    @Test("Detach command is correct")
-    func detachClient() {
-        let action = QuickAction.sessionActions.first { $0.title == "Detach" }
-        #expect(action != nil)
-        #expect(action?.command == "detach-client")
-    }
 }
 
 // MARK: - Rename / Input Actions Tests
@@ -202,25 +172,16 @@ struct QuickActionInputTests {
         #expect(action?.command == "rename-window")
     }
 
-    @Test("Rename Session requires input")
-    func renameSessionRequiresInput() {
-        let action = QuickAction.sessionActions.first { $0.title == "Rename Session" }
-        #expect(action != nil)
-        #expect(action?.requiresInput == true)
-        #expect(action?.inputPlaceholder == "Session name")
-        #expect(action?.command == "rename-session")
-    }
-
-    @Test("Only two actions require input")
-    func onlyTwoActionsRequireInput() {
+    @Test("Only one action requires input")
+    func onlyOneActionRequiresInput() {
         let inputActions = QuickAction.allActions.filter(\.requiresInput)
-        #expect(inputActions.count == 2)
+        #expect(inputActions.count == 1)
     }
 
     @Test("Non-rename actions do not require input")
     func nonRenameActionsDontRequireInput() {
         let nonInput = QuickAction.allActions.filter { !$0.requiresInput }
-        #expect(nonInput.count == 13)
+        #expect(nonInput.count == 10)
         for action in nonInput {
             #expect(action.requiresInput == false)
         }

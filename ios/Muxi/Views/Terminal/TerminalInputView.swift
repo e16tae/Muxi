@@ -21,6 +21,15 @@ final class TerminalInputAccessor: UIView, UIKeyInput {
     /// Called for raw terminal bytes (Ctrl/Alt combos) from hardware keyboard.
     var onRawData: ((Data) -> Void)?
 
+    // MARK: - Input Accessory View
+
+    private var _inputAccessoryView: UIView?
+    override var inputAccessoryView: UIView? { _inputAccessoryView }
+
+    func setInputAccessoryView(_ view: UIView?) {
+        _inputAccessoryView = view
+    }
+
     // MARK: - First Responder
 
     override var canBecomeFirstResponder: Bool { true }
@@ -154,6 +163,11 @@ struct TerminalInputView: UIViewRepresentable {
     var onRawData: ((Data) -> Void)?
     @Binding var isActive: Bool
 
+    // Extended keyboard (displayed as inputAccessoryView above the keyboard)
+    var theme: Theme?
+    var inputHandler: InputHandler?
+    var onExtendedInput: ((Data) -> Void)?
+
     func makeCoordinator() -> Coordinator {
         Coordinator(isActive: $isActive)
     }
@@ -174,6 +188,24 @@ struct TerminalInputView: UIViewRepresentable {
             view.heightAnchor.constraint(equalToConstant: 1),
         ])
 
+        // Set up extended keyboard as inputAccessoryView
+        if let theme, let inputHandler {
+            let extKeyboard = ExtendedKeyboardView(
+                theme: theme,
+                inputHandler: inputHandler,
+                onInput: onExtendedInput
+            )
+            let hostingController = UIHostingController(rootView: extKeyboard)
+            hostingController.view.frame = CGRect(
+                x: 0, y: 0,
+                width: UIScreen.main.bounds.width, height: 44
+            )
+            hostingController.view.autoresizingMask = [.flexibleWidth]
+            hostingController.view.backgroundColor = .clear
+            view.setInputAccessoryView(hostingController.view)
+            context.coordinator.accessoryHostingController = hostingController
+        }
+
         context.coordinator.startObservingKeyboard()
         return view
     }
@@ -192,6 +224,15 @@ struct TerminalInputView: UIViewRepresentable {
                 uiView.deactivate()
             }
         }
+
+        // Update extended keyboard accessory view
+        if let theme, let inputHandler {
+            context.coordinator.accessoryHostingController?.rootView = ExtendedKeyboardView(
+                theme: theme,
+                inputHandler: inputHandler,
+                onInput: onExtendedInput
+            )
+        }
     }
 
     // MARK: - Coordinator
@@ -199,6 +240,7 @@ struct TerminalInputView: UIViewRepresentable {
     final class Coordinator {
         @Binding var isActive: Bool
         weak var inputView: TerminalInputAccessor?
+        var accessoryHostingController: UIHostingController<ExtendedKeyboardView>?
         private var keyboardObserver: Any?
 
         init(isActive: Binding<Bool>) {
@@ -211,7 +253,11 @@ struct TerminalInputView: UIViewRepresentable {
                 object: nil,
                 queue: .main
             ) { [weak self] _ in
-                self?.isActive = false
+                // Guard against view teardown: if the accessor has been removed
+                // from the window, don't update the binding — its owning @State
+                // may be mid-deallocation (causes crash on disconnect).
+                guard let self, self.inputView?.window != nil else { return }
+                self.isActive = false
             }
         }
 

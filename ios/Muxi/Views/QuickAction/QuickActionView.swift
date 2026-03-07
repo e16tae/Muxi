@@ -36,7 +36,6 @@ struct QuickAction: Identifiable {
     enum Category: String, CaseIterable {
         case pane = "Pane"
         case window = "Window"
-        case session = "Session"
     }
 }
 
@@ -45,7 +44,7 @@ struct QuickAction: Identifiable {
 extension QuickAction {
 
     /// All predefined tmux quick actions grouped by category.
-    static let allActions: [QuickAction] = paneActions + windowActions + sessionActions
+    static let allActions: [QuickAction] = paneActions + windowActions
 
     static let paneActions: [QuickAction] = [
         QuickAction(
@@ -121,34 +120,6 @@ extension QuickAction {
         ),
     ]
 
-    static let sessionActions: [QuickAction] = [
-        QuickAction(
-            title: "New Session",
-            icon: "plus.circle",
-            command: "new-session -d",
-            category: .session
-        ),
-        QuickAction(
-            title: "Kill Session",
-            icon: "xmark.circle",
-            command: "kill-session",
-            category: .session
-        ),
-        QuickAction(
-            title: "Detach",
-            icon: "arrow.uturn.left",
-            command: "detach-client",
-            category: .session
-        ),
-        QuickAction(
-            title: "Rename Session",
-            icon: "pencil.circle",
-            command: "rename-session",
-            category: .session,
-            requiresInput: true,
-            inputPlaceholder: "Session name"
-        ),
-    ]
 
     /// Returns all predefined actions filtered to the given category.
     static func actions(for category: Category) -> [QuickAction] {

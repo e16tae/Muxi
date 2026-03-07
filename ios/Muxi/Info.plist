@@ -22,5 +22,7 @@
 	<array>
 		<string>Fonts/sarasa-term-k-regular-nerd-font.ttf</string>
 	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
 </dict>
 </plist>

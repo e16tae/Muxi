@@ -44,6 +44,7 @@ struct TerminalSessionView: View {
             // Custom toolbar
             HStack {
                 Button {
+                    isKeyboardActive = false
                     connectionManager.disconnect()
                 } label: {
                     Image(systemName: "xmark")
@@ -180,6 +181,11 @@ struct TerminalSessionView: View {
             .padding(.bottom, 16)
         }
         .onChange(of: panes) { _, newPanes in
+            let paneIds = Set(newPanes.map(\.id))
+            if let active = activePaneId, !paneIds.contains(active) {
+                // Active pane was removed — select the last available pane
+                activePaneId = newPanes.last?.id
+            }
             if activePaneId == nil, let first = newPanes.first {
                 activePaneId = first.id
                 isKeyboardActive = true

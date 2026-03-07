@@ -13,58 +13,40 @@ struct ExtendedKeyboardView: View {
     /// Callback invoked with the raw bytes to send over the SSH channel.
     var onInput: ((Data) -> Void)?
 
-    /// Callback to dismiss the software keyboard.
-    var onDismissKeyboard: (() -> Void)?
-
     // MARK: - Body
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-        HStack(spacing: MuxiTokens.Spacing.sm) {
-            // Immediate keys
-            keyButton("Esc") { send(key: .escape) }
-            keyButton("Tab") { send(key: .tab) }
+            HStack(spacing: MuxiTokens.Spacing.sm) {
+                // Immediate keys
+                keyButton("Esc") { send(key: .escape) }
+                keyButton("Tab") { send(key: .tab) }
 
-            // Sticky modifiers — read directly from the @Observable InputHandler
-            // so highlights automatically update when modifiers auto-deactivate.
-            modifierButton("Ctrl", active: inputHandler.ctrlActive) {
-                inputHandler.toggleCtrl()
-            }
-            modifierButton("Alt", active: inputHandler.altActive) {
-                inputHandler.toggleAlt()
-            }
-
-            Divider()
-                .frame(height: 24)
-                .background(MuxiTokens.Colors.borderDefault)
-
-            // Arrow keys
-            keyButton("\u{2190}") { send(key: .arrowLeft) }   // left arrow
-                .accessibilityLabel("Arrow Left")
-            keyButton("\u{2191}") { send(key: .arrowUp) }     // up arrow
-                .accessibilityLabel("Arrow Up")
-            keyButton("\u{2193}") { send(key: .arrowDown) }   // down arrow
-                .accessibilityLabel("Arrow Down")
-            keyButton("\u{2192}") { send(key: .arrowRight) }  // right arrow
-                .accessibilityLabel("Arrow Right")
-
-            if onDismissKeyboard != nil {
-                Spacer()
-
-                Button { onDismissKeyboard?() } label: {
-                    Image(systemName: "keyboard.chevron.compact.down")
-                        .font(MuxiTokens.Typography.label)
-                        .foregroundStyle(MuxiTokens.Colors.textPrimary)
-                        .frame(minWidth: 36, minHeight: 32)
-                        .background(MuxiTokens.Colors.accentMuted)
-                        .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
+                // Sticky modifiers — read directly from the @Observable InputHandler
+                // so highlights automatically update when modifiers auto-deactivate.
+                modifierButton("Ctrl", active: inputHandler.ctrlActive) {
+                    inputHandler.toggleCtrl()
                 }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Dismiss Keyboard")
+                modifierButton("Alt", active: inputHandler.altActive) {
+                    inputHandler.toggleAlt()
+                }
+
+                Divider()
+                    .frame(height: 24)
+                    .background(MuxiTokens.Colors.borderDefault)
+
+                // Arrow keys
+                keyButton("\u{2190}") { send(key: .arrowLeft) }
+                    .accessibilityLabel("Arrow Left")
+                keyButton("\u{2191}") { send(key: .arrowUp) }
+                    .accessibilityLabel("Arrow Up")
+                keyButton("\u{2193}") { send(key: .arrowDown) }
+                    .accessibilityLabel("Arrow Down")
+                keyButton("\u{2192}") { send(key: .arrowRight) }
+                    .accessibilityLabel("Arrow Right")
             }
-        }
-        .padding(.horizontal, MuxiTokens.Spacing.sm)
-        .padding(.vertical, MuxiTokens.Spacing.xs)
+            .padding(.horizontal, MuxiTokens.Spacing.lg)
+            .padding(.vertical, MuxiTokens.Spacing.xs)
         }
         .frame(height: 44)
         .background(theme.background.color)

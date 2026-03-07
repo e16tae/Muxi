@@ -49,6 +49,7 @@ targets:
     info:
       path: Muxi/Info.plist
       properties:
+        UILaunchScreen: {}
         UIAppFonts:
           - Fonts/sarasa-term-k-regular-nerd-font.ttf
 

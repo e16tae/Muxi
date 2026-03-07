@@ -18,6 +18,8 @@ struct TerminalSessionView: View {
     @State private var isKeyboardActive = false
     @State private var scrollbackState: [String: ScrollbackState] = [:]
     @State private var scrollbackCaches: [String: TerminalBuffer] = [:]
+    @State private var showNewSessionAlert = false
+    @State private var newSessionName = ""
 
     /// Build pane info from ConnectionManager's live pane data.
     private var panes: [PaneContainerView.PaneInfo] {
@@ -38,108 +40,163 @@ struct TerminalSessionView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                if panes.isEmpty {
-                    placeholderView
-                } else {
-                    GeometryReader { geometry in
-                        PaneContainerView(
-                            panes: panes,
-                            theme: themeManager.currentTheme,
-                            fontSize: themeManager.fontSize,
-                            activePaneId: $activePaneId,
-                            onPaneTapped: { _ in
-                                isKeyboardActive = true
-                            },
-                            onPaste: { text in
-                                pasteToActivePane(text)
-                            },
-                            scrollbackBuffer: activePaneId.flatMap { scrollbackCaches[$0] },
-                            scrollbackOffset: activePaneId.flatMap {
-                                if case .scrolling(let offset, _) = scrollbackState[$0] {
-                                    return offset
-                                }
-                                return nil
-                            } ?? 0,
-                            onScrollOffsetChanged: { paneId, delta in
-                                handleScrollDelta(paneId: paneId, delta: delta)
-                            },
-                            showNewOutputIndicator: activePaneId.map { connectionManager.paneHasNewOutput.contains($0) } ?? false,
-                            onReturnToLive: { paneId in
-                                returnToLive(paneId: paneId)
+        VStack(spacing: 0) {
+            // Custom toolbar
+            HStack {
+                Button {
+                    connectionManager.disconnect()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(MuxiTokens.Typography.body)
+                        .foregroundStyle(MuxiTokens.Colors.accentDefault)
+                }
+
+                Spacer()
+
+                // Session switcher dropdown
+                Menu {
+                    ForEach(connectionManager.sessions) { session in
+                        Button {
+                            guard session.name != sessionName else { return }
+                            Task { try? await connectionManager.switchSession(to: session.name) }
+                        } label: {
+                            if session.name == sessionName {
+                                Label(session.name, systemImage: "checkmark")
+                            } else {
+                                Text(session.name)
                             }
-                        )
-                        .onChange(of: geometry.size) { _, newSize in
-                            updateTerminalSize(newSize)
                         }
-                        .onChange(of: themeManager.fontSize) { _, _ in
-                            updateTerminalSize(geometry.size)
-                        }
-                        .onAppear {
-                            updateTerminalSize(geometry.size)
-                        }
+                    }
+
+                    Divider()
+
+                    Button {
+                        showNewSessionAlert = true
+                    } label: {
+                        Label("New Session", systemImage: "plus")
+                    }
+                } label: {
+                    HStack(spacing: MuxiTokens.Spacing.xs) {
+                        Text(sessionName)
+                            .font(MuxiTokens.Typography.title)
+                            .foregroundStyle(MuxiTokens.Colors.textPrimary)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                            .foregroundStyle(MuxiTokens.Colors.textSecondary)
                     }
                 }
 
-                TerminalInputView(
-                    onText: { text in
-                        for char in text {
-                            let data = inputHandler.data(for: char)
-                            sendToActivePane(data)
-                        }
-                    },
-                    onDelete: {
-                        sendToActivePane(Data([0x7F]))
-                    },
-                    onSpecialKey: { key in
-                        let data = inputHandler.data(for: key)
-                        sendToActivePane(data)
-                    },
-                    onRawData: { data in
-                        sendToActivePane(data)
-                    },
-                    isActive: $isKeyboardActive
-                )
-                .frame(width: 1, height: 1)
-                .opacity(0)
+                Spacer()
 
-                ExtendedKeyboardView(
-                    theme: themeManager.currentTheme,
-                    inputHandler: inputHandler,
-                    onInput: { data in
+                Button {
+                    isKeyboardActive.toggle()
+                } label: {
+                    Image(systemName: isKeyboardActive
+                          ? "keyboard.chevron.compact.down"
+                          : "keyboard")
+                        .font(MuxiTokens.Typography.body)
+                        .foregroundStyle(MuxiTokens.Colors.accentDefault)
+                }
+            }
+            .padding(.horizontal, MuxiTokens.Spacing.lg)
+            .padding(.vertical, MuxiTokens.Spacing.sm)
+            .background(MuxiTokens.Colors.surfaceDefault)
+
+            if panes.isEmpty {
+                placeholderView
+            } else {
+                GeometryReader { geometry in
+                    PaneContainerView(
+                        panes: panes,
+                        theme: themeManager.currentTheme,
+                        fontSize: themeManager.fontSize,
+                        activePaneId: $activePaneId,
+                        onPaneTapped: { _ in
+                            isKeyboardActive = true
+                        },
+                        onPaste: { text in
+                            pasteToActivePane(text)
+                        },
+                        scrollbackBuffer: activePaneId.flatMap { scrollbackCaches[$0] },
+                        scrollbackOffset: activePaneId.flatMap {
+                            if case .scrolling(let offset, _) = scrollbackState[$0] {
+                                return offset
+                            }
+                            return nil
+                        } ?? 0,
+                        onScrollOffsetChanged: { paneId, delta in
+                            handleScrollDelta(paneId: paneId, delta: delta)
+                        },
+                        showNewOutputIndicator: activePaneId.map { connectionManager.paneHasNewOutput.contains($0) } ?? false,
+                        onReturnToLive: { paneId in
+                            returnToLive(paneId: paneId)
+                        }
+                    )
+                    .onChange(of: geometry.size) { _, newSize in
+                        updateTerminalSize(newSize)
+                    }
+                    .onChange(of: themeManager.fontSize) { _, _ in
+                        updateTerminalSize(geometry.size)
+                    }
+                    .onAppear {
+                        updateTerminalSize(geometry.size)
+                    }
+                }
+            }
+
+            TerminalInputView(
+                onText: { text in
+                    for char in text {
+                        let data = inputHandler.data(for: char)
                         sendToActivePane(data)
-                    },
-                    onDismissKeyboard: {
-                        isKeyboardActive = false
                     }
-                )
-            }
-            .overlay(alignment: .bottomTrailing) {
-                QuickActionButton(onAction: { command in
-                    sendTmuxCommand(command)
-                })
-                .padding(.trailing, 16)
-                .padding(.bottom, 60)
-            }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Button("Detach") {
-                        connectionManager.detach()
-                    }
+                },
+                onDelete: {
+                    sendToActivePane(Data([0x7F]))
+                },
+                onSpecialKey: { key in
+                    let data = inputHandler.data(for: key)
+                    sendToActivePane(data)
+                },
+                onRawData: { data in
+                    sendToActivePane(data)
+                },
+                isActive: $isKeyboardActive,
+                theme: themeManager.currentTheme,
+                inputHandler: inputHandler,
+                onExtendedInput: { data in
+                    sendToActivePane(data)
                 }
-                ToolbarItem(placement: .principal) {
-                    Text(sessionName)
-                        .font(.headline)
-                }
-            }
-            .navigationBarTitleDisplayMode(.inline)
+            )
+            .frame(width: 1, height: 1)
+            .opacity(0)
+        }
+        .background(themeManager.currentTheme.background.color)
+        .overlay(alignment: .bottomTrailing) {
+            QuickActionButton(onAction: { command in
+                sendTmuxCommand(command)
+            })
+            .padding(.trailing, 16)
+            .padding(.bottom, 16)
         }
         .onChange(of: panes) { _, newPanes in
             if activePaneId == nil, let first = newPanes.first {
                 activePaneId = first.id
                 isKeyboardActive = true
             }
+        }
+        .alert("New Session", isPresented: $showNewSessionAlert) {
+            TextField("Session name", text: $newSessionName)
+            Button("Create") {
+                let name = newSessionName.trimmingCharacters(in: .whitespaces)
+                newSessionName = ""
+                guard !name.isEmpty else { return }
+                Task { try? await connectionManager.createAndSwitchToNewSession(name: name) }
+            }
+            Button("Cancel", role: .cancel) { newSessionName = "" }
+        }
+        .task(id: sessionName) {
+            _ = try? await connectionManager.refreshSessions()
         }
     }
 

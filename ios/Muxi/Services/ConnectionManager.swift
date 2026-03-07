@@ -6,13 +6,13 @@ import os
 /// Represents the high-level state of a ``ConnectionManager`` session.
 ///
 /// The typical lifecycle progresses:
-///   `.disconnected` -> `.connecting` -> `.sessionList` -> `.attached`
+///   `.disconnected` -> `.connecting` -> `.attached`
 ///
-/// `.reconnecting` is reserved for future automatic reconnect logic.
+/// `.reconnecting` is entered when an active connection drops and the
+/// manager attempts automatic re-establishment with exponential backoff.
 enum ConnectionState: Equatable, Sendable {
     case disconnected
     case connecting
-    case sessionList
     case attached(sessionName: String)
     case reconnecting
 }
@@ -42,6 +42,7 @@ final class ConnectionManager {
     private let sshService: SSHServiceProtocol
     private let tmuxService = TmuxControlService()
     private let keychainService = KeychainService()
+    private let lastSessionStore: LastSessionStore
 
     /// The current connection state.
     private(set) var state: ConnectionState = .disconnected
@@ -127,27 +128,33 @@ final class ConnectionManager {
     /// implementation for testing.
     init(
         sshService: SSHServiceProtocol? = nil,
+        lastSessionStore: LastSessionStore = LastSessionStore(),
         maxReconnectAttempts: Int = 5,
         baseDelay: TimeInterval = 1.0
     ) {
         self.sshService = sshService ?? SSHService()
+        self.lastSessionStore = lastSessionStore
         self.maxReconnectAttempts = maxReconnectAttempts
         self.baseDelay = baseDelay
     }
 
     // MARK: - Connect
 
-    /// Establish an SSH connection to the given server and query its tmux
-    /// sessions.
+    /// Establish an SSH connection to the given server, query its tmux
+    /// sessions, and auto-attach to the best candidate.
+    ///
+    /// Session selection priority:
+    /// 1. Last-used session for this server (if it still exists)
+    /// 2. First available session
+    /// 3. Create a new session named "main"
     ///
     /// - Parameters:
     ///   - server: The server profile to connect to.
     ///   - password: An optional password.  When `nil` and the server's
     ///     ``AuthMethod`` is `.password`, the password is retrieved from the
     ///     Keychain.
-    /// - Returns: The list of tmux sessions found on the server.
-    func connect(server: Server, password: String? = nil) async throws -> [TmuxSession] {
-        guard state == .disconnected else { return sessions }
+    func connect(server: Server, password: String? = nil) async throws {
+        guard state == .disconnected else { return }
         state = .connecting
         currentServer = server
         logger.info("Connecting to \(server.host):\(server.port) user=\(server.username)")
@@ -174,8 +181,33 @@ final class ConnectionManager {
             )
             sessions = TmuxControlService.parseFormattedSessionList(output)
             logger.info("Found \(self.sessions.count) tmux sessions")
-            state = .sessionList
-            return sessions
+
+            // Auto-select session: last-used > first available > create new
+            let serverID = server.id.uuidString
+            let targetSession: String
+
+            if let lastUsed = lastSessionStore.lastSessionName(forServerID: serverID),
+               sessions.contains(where: { $0.name == lastUsed }) {
+                targetSession = lastUsed
+                logger.info("Resuming last-used session: \(lastUsed)")
+            } else if let first = sessions.first {
+                targetSession = first.name
+                logger.info("Attaching to first session: \(targetSession)")
+            } else {
+                // No sessions exist — create one
+                _ = try await sshService.execCommand("tmux new-session -d -s main")
+                targetSession = "main"
+                logger.info("Created new session: main")
+                // Refresh to populate sessions array
+                let refreshed = try await sshService.execCommand(
+                    "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}'"
+                )
+                sessions = TmuxControlService.parseFormattedSessionList(refreshed)
+            }
+
+            try await performAttach(sessionName: targetSession)
+            lastSessionStore.save(sessionName: targetSession, forServerID: serverID)
+
         } catch {
             logger.error("Connection failed: \(error)")
             state = .disconnected
@@ -245,7 +277,7 @@ final class ConnectionManager {
                 try? await sshService.writeToChannel(Data("detach\n".utf8))
                 sshService.disconnect()
             }
-        } else if state == .sessionList || state == .connecting {
+        } else if state == .connecting {
             lastBackgroundServer = currentServer
             lastBackgroundSession = nil
             disconnectedByBackground = true
@@ -274,14 +306,16 @@ final class ConnectionManager {
             return
         }
 
-        // Restore state needed by reconnect().
         currentServer = server
         let sessionName = lastBackgroundSession
 
         if let sessionName {
             state = .attached(sessionName: sessionName)
         } else {
-            state = .sessionList
+            // Was connecting/transitioning — just disconnect cleanly
+            lastBackgroundServer = nil
+            lastBackgroundSession = nil
+            return
         }
 
         lastBackgroundServer = nil
@@ -294,57 +328,26 @@ final class ConnectionManager {
 
     // MARK: - Session Management
 
-    /// Attach to a tmux session by name.
-    ///
-    /// Opens an interactive SSH shell channel running
-    /// `tmux -CC attach -t <name>` and pipes output through
-    /// ``TmuxControlService/feed(_:)``.
-    func attachSession(_ session: TmuxSession) async throws {
-        // Wait for any in-flight detach to finish before opening a new
-        // shell.  Without this, the detach Task could write "detach\n"
-        // to the NEW channel, immediately detaching the new session.
-        logger.info("attachSession: waiting for detachTask...")
-        await detachTask?.value
-        detachTask = nil
-        logger.info("attachSession: detachTask done, SSH state=\(String(describing: self.sshService.state))")
-
-        guard state == .sessionList else {
-            logger.warning("attachSession called but state is not .sessionList (state=\(String(describing: self.state)))")
-            return
-        }
-        logger.info("Attaching to session: \(session.name)")
-
-        // Wire tmux callbacks before starting the shell.
+    /// Core attach logic: wire callbacks, open shell, send tmux -CC attach.
+    /// Callers must ensure previous channel is cleaned up before calling.
+    private func performAttach(sessionName: String) async throws {
         wireCallbacks()
 
-        // Start an interactive shell, feeding data to the tmux parser.
-        logger.info("Starting SSH shell...")
         let channel = try await sshService.startShell(onData: { [weak self] data in
             Task { @MainActor in
                 self?.tmuxService.feed(data)
             }
         })
-        logger.info("Shell started, sending tmux -CC attach command...")
-
         activeChannel = channel
 
-        // Send tmux -CC attach command through the shell (actor-routed).
-        let command = "tmux -CC attach -t \(session.name.shellEscaped())\n"
+        let command = "tmux -CC attach -t \(sessionName.shellEscaped())\n"
         try await sshService.writeToChannel(Data(command.utf8))
-        logger.info("tmux attach command sent, transitioning to .attached")
+        state = .attached(sessionName: sessionName)
 
-        state = .attached(sessionName: session.name)
-
-        // Send a small initial size to trigger %layout-change.
-        // The TerminalSessionView will send the correct size once
-        // it knows its actual dimensions via GeometryReader.
         pendingInitialResize = true
         let refreshCmd = "refresh-client -C 80,24\n"
         try await sshService.writeToChannel(Data(refreshCmd.utf8))
-        logger.info("Sent initial refresh-client, awaiting view-based resize")
 
-        // Monitor SSH connection — trigger reconnect if the read loop
-        // ends without a tmux %exit (e.g. network drop).
         sshMonitorTask?.cancel()
         sshMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -359,37 +362,59 @@ final class ConnectionManager {
         }
     }
 
-    /// Detach from the current tmux session, returning to the session list.
+    /// Attach to a tmux session by name.
     ///
-    /// Closes the SSH shell channel, which causes tmux to detach the
-    /// session (standard tmux behavior on client disconnect). The tmux
-    /// session stays alive and can be re-attached.
-    ///
-    /// We intentionally do NOT send "detach\n" before closing, because
-    /// that creates a race: tmux closes the channel in response, the
-    /// readTask sees EOF and sets SSH state to `.disconnected` before
-    /// `closeShell()` can cancel it, causing subsequent `startShell()`
-    /// calls to fail. Closing the channel directly ensures the readTask
-    /// is always cancelled first.
+    /// Opens an interactive SSH shell channel running
+    /// `tmux -CC attach -t <name>` and pipes output through
+    /// ``TmuxControlService/feed(_:)``.
+    func attachSession(_ session: TmuxSession) async throws {
+        await detachTask?.value
+        detachTask = nil
+        try await performAttach(sessionName: session.name)
+        if let serverID = currentServer?.id.uuidString {
+            lastSessionStore.save(sessionName: session.name, forServerID: serverID)
+        }
+    }
+
+    /// Disconnect from the server entirely and return to the server list.
     func detach() {
+        disconnect()
+    }
+
+    /// Switch to a different tmux session from within the terminal.
+    /// Closes the current control mode channel and reattaches to the new session.
+    func switchSession(to sessionName: String) async throws {
+        guard case .attached = state else { return }
+
+        // Clean up current session
         sshMonitorTask?.cancel()
         sshMonitorTask = nil
-
         activeChannel = nil
         tmuxService.resetLineBuffer()
         paneBuffers = [:]
         currentPanes = []
+        scrolledBackPanes = []
+        paneHasNewOutput = []
+        capturePaneQueue = []
         lastSentSize = (0, 0)
-        state = .sessionList
 
-        // Close the shell channel — tmux detaches the session when the
-        // control-mode client disconnects. Stored in detachTask so
-        // attachSession() can await completion before opening a new shell.
-        detachTask = Task { [weak self] in
-            self?.logger.info("detachTask: closing shell...")
-            await self?.sshService.closeShell()
-            self?.logger.info("detachTask: shell closed, SSH state=\(String(describing: self?.sshService.state))")
+        // Close the shell channel
+        await sshService.closeShell()
+
+        // Attach to new session
+        try await performAttach(sessionName: sessionName)
+
+        // Save as last-used
+        if let serverID = currentServer?.id.uuidString {
+            lastSessionStore.save(sessionName: sessionName, forServerID: serverID)
         }
+    }
+
+    /// Create a new tmux session and switch to it.
+    func createAndSwitchToNewSession(name: String) async throws {
+        _ = try await sshService.execCommand("tmux new-session -d -s \(name.shellEscaped())")
+        try await refreshSessions()
+        try await switchSession(to: name)
     }
 
     // MARK: - Terminal Resize
@@ -417,7 +442,7 @@ final class ConnectionManager {
     /// Create a new detached tmux session with the given name on the remote
     /// server, then refresh the session list.
     func createTmuxSession(name: String) async throws {
-        guard state == .sessionList else { return }
+        guard case .attached = state else { return }
         _ = try await sshService.execCommand("tmux new-session -d -s \(name.shellEscaped())")
         try await refreshSessions()
     }
@@ -425,7 +450,7 @@ final class ConnectionManager {
     /// Kill the specified tmux session on the remote server, then refresh
     /// the session list.
     func deleteTmuxSession(_ session: TmuxSession) async throws {
-        guard state == .sessionList else { return }
+        guard case .attached = state else { return }
         _ = try await sshService.execCommand("tmux kill-session -t \(session.name.shellEscaped())")
         try await refreshSessions()
     }
@@ -437,7 +462,9 @@ final class ConnectionManager {
     ///
     /// If the manager was attached to a tmux session before the disconnect,
     /// and that session still exists on the server, the manager automatically
-    /// re-attaches.  Otherwise it falls back to `.sessionList`.
+    /// re-attaches.  Otherwise it tries the last-used session, then the first
+    /// available session.  If no sessions exist, the state moves to
+    /// `.disconnected`.
     ///
     /// After exhausting ``maxReconnectAttempts`` the state moves to
     /// `.disconnected`.
@@ -459,7 +486,6 @@ final class ConnectionManager {
         for attempt in 1...maxReconnectAttempts {
             reconnectAttempt = attempt
             do {
-                // Re-establish SSH connection using cached credentials.
                 try await sshService.connect(
                     host: server.host,
                     port: server.port,
@@ -467,30 +493,33 @@ final class ConnectionManager {
                     auth: auth
                 )
 
-                // Refresh the session list from the server.
                 try await refreshSessions()
 
-                // Re-attach if we were attached before and the session still
-                // exists on the server.
-                if let sessionName = previousSessionName,
-                   let session = sessions.first(where: { $0.name == sessionName }) {
-                    // Temporarily move to sessionList so attachSession's
-                    // guard passes, then attempt to re-attach.
-                    state = .sessionList
-                    do {
-                        try await attachSession(session)
-                    } catch {
-                        // Shell/attach failed but SSH is connected; stay on session list.
-                        state = .sessionList
-                    }
+                // Try to reattach: previous session > last-used > first available
+                let serverID = server.id.uuidString
+                let targetSession: String?
+
+                if let name = previousSessionName,
+                   sessions.contains(where: { $0.name == name }) {
+                    targetSession = name
+                } else if let lastUsed = lastSessionStore.lastSessionName(forServerID: serverID),
+                          sessions.contains(where: { $0.name == lastUsed }) {
+                    targetSession = lastUsed
                 } else {
-                    state = .sessionList
+                    targetSession = sessions.first?.name
+                }
+
+                if let target = targetSession {
+                    try await performAttach(sessionName: target)
+                    lastSessionStore.save(sessionName: target, forServerID: serverID)
+                } else {
+                    // No sessions at all
+                    state = .disconnected
                 }
 
                 reconnectAttempt = 0
-                return // Success
+                return
             } catch {
-                // Exponential backoff before next attempt.
                 if attempt < maxReconnectAttempts {
                     let delay = baseDelay * pow(2, Double(attempt - 1))
                     try? await Task.sleep(for: .seconds(delay))
@@ -516,7 +545,7 @@ final class ConnectionManager {
     /// - Returns: The captured scrollback content with ANSI escapes.
     func fetchScrollback(paneId: String, lineCount: Int = 500) async throws -> String {
         switch state {
-        case .disconnected, .connecting, .reconnecting, .sessionList:
+        case .disconnected, .connecting, .reconnecting:
             throw ScrollbackError.notAttached
         case .attached:
             break

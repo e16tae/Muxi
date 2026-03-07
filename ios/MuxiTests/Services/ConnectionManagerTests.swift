@@ -33,14 +33,14 @@ final class ConnectionManagerTests: XCTestCase {
         ssh.mockExecResults["tmux list-sessions"] = "$0:main:2:1740700800"
         let manager = ConnectionManager(sshService: ssh)
 
-        let sessions = try await manager.connect(
+        try await manager.connect(
             server: makeServer(),
             password: "p"
         )
 
-        XCTAssertEqual(manager.state, .sessionList)
-        XCTAssertEqual(sessions.count, 1)
-        XCTAssertEqual(sessions[0].name, "main")
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
+        XCTAssertEqual(manager.sessions.count, 1)
+        XCTAssertEqual(manager.sessions[0].name, "main")
     }
 
     func testConnectSetsCurrentServer() async throws {
@@ -50,7 +50,7 @@ final class ConnectionManagerTests: XCTestCase {
         let manager = ConnectionManager(sshService: ssh)
         let server = makeServer(name: "MyServer", host: "10.0.0.1")
 
-        _ = try await manager.connect(server: server, password: "pw")
+        try await manager.connect(server: server, password: "pw")
 
         XCTAssertEqual(manager.currentServer?.name, "MyServer")
         XCTAssertEqual(manager.currentServer?.host, "10.0.0.1")
@@ -66,31 +66,34 @@ final class ConnectionManagerTests: XCTestCase {
             """
         let manager = ConnectionManager(sshService: ssh)
 
-        let sessions = try await manager.connect(
+        try await manager.connect(
             server: makeServer(),
             password: "p"
         )
 
-        XCTAssertEqual(sessions.count, 3)
-        XCTAssertEqual(sessions[0].name, "main")
-        XCTAssertEqual(sessions[1].name, "dev")
-        XCTAssertEqual(sessions[2].name, "staging")
         XCTAssertEqual(manager.sessions.count, 3)
+        XCTAssertEqual(manager.sessions[0].name, "main")
+        XCTAssertEqual(manager.sessions[1].name, "dev")
+        XCTAssertEqual(manager.sessions[2].name, "staging")
+        // Auto-attaches to first session
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
     }
 
-    func testConnectWithEmptySessionList() async throws {
+    func testConnectWithEmptySessionListCreatesNew() async throws {
         let ssh = MockSSHService()
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = ""
+        // After creating "main", the next list-sessions returns it
+        ssh.mockExecResults["tmux new-session"] = ""
         let manager = ConnectionManager(sshService: ssh)
 
-        let sessions = try await manager.connect(
+        try await manager.connect(
             server: makeServer(),
             password: "p"
         )
 
-        XCTAssertEqual(sessions.count, 0)
-        XCTAssertEqual(manager.state, .sessionList)
+        // Auto-creates and attaches to "main"
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
     }
 
     // MARK: - Disconnect
@@ -118,41 +121,40 @@ final class ConnectionManagerTests: XCTestCase {
 
     // MARK: - Attach / Detach
 
-    func testAttachSession() async throws {
+    func testAutoAttachOnConnect() async throws {
         let ssh = MockSSHService()
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
         let manager = ConnectionManager(sshService: ssh)
-        let sessions = try await manager.connect(server: makeServer(), password: "p")
 
-        try await manager.attachSession(sessions[0])
+        try await manager.connect(server: makeServer(), password: "p")
 
+        // connect() now auto-attaches to the first session
         XCTAssertEqual(manager.state, .attached(sessionName: "work"))
     }
 
-    func testDetach() async throws {
+    func testDetachDisconnects() async throws {
         let ssh = MockSSHService()
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
         let manager = ConnectionManager(sshService: ssh)
-        let sessions = try await manager.connect(server: makeServer(), password: "p")
-        try await manager.attachSession(sessions[0])
+        try await manager.connect(server: makeServer(), password: "p")
 
         manager.detach()
 
-        XCTAssertEqual(manager.state, .sessionList)
+        // detach() now fully disconnects
+        XCTAssertEqual(manager.state, .disconnected)
     }
 
     // MARK: - Attach with Shell Channel
 
-    func testAttachSessionCallsStartShell() async throws {
+    func testConnectAutoAttachStartsShell() async throws {
         let ssh = MockSSHService()
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
         let manager = ConnectionManager(sshService: ssh)
-        let sessions = try await manager.connect(server: makeServer(), password: "p")
 
-        try await manager.attachSession(sessions[0])
+        try await manager.connect(server: makeServer(), password: "p")
 
         XCTAssertEqual(manager.state, .attached(sessionName: "work"))
         XCTAssertNotNil(manager.activeChannel)
@@ -163,8 +165,7 @@ final class ConnectionManagerTests: XCTestCase {
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
         let manager = ConnectionManager(sshService: ssh)
-        let sessions = try await manager.connect(server: makeServer(), password: "p")
-        try await manager.attachSession(sessions[0])
+        try await manager.connect(server: makeServer(), password: "p")
 
         manager.disconnect()
 
@@ -173,17 +174,16 @@ final class ConnectionManagerTests: XCTestCase {
         XCTAssertTrue(manager.currentPanes.isEmpty)
     }
 
-    func testDetachResetsToSessionList() async throws {
+    func testDetachDisconnectsAndCleansUp() async throws {
         let ssh = MockSSHService()
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
         let manager = ConnectionManager(sshService: ssh)
-        let sessions = try await manager.connect(server: makeServer(), password: "p")
-        try await manager.attachSession(sessions[0])
+        try await manager.connect(server: makeServer(), password: "p")
 
         manager.detach()
 
-        XCTAssertEqual(manager.state, .sessionList)
+        XCTAssertEqual(manager.state, .disconnected)
         XCTAssertNil(manager.activeChannel)
         XCTAssertTrue(manager.paneBuffers.isEmpty)
     }
@@ -196,7 +196,7 @@ final class ConnectionManagerTests: XCTestCase {
         let manager = ConnectionManager(sshService: ssh)
 
         do {
-            _ = try await manager.connect(server: makeServer(), password: "p")
+            try await manager.connect(server: makeServer(), password: "p")
             XCTFail("Expected TmuxError.notInstalled")
         } catch let error as TmuxError {
             XCTAssertEqual(error, .notInstalled)
@@ -212,7 +212,7 @@ final class ConnectionManagerTests: XCTestCase {
         let manager = ConnectionManager(sshService: ssh)
 
         do {
-            _ = try await manager.connect(server: makeServer(), password: "p")
+            try await manager.connect(server: makeServer(), password: "p")
             XCTFail("Expected TmuxError.versionTooOld")
         } catch let error as TmuxError {
             if case .versionTooOld(let detected) = error {
@@ -232,9 +232,9 @@ final class ConnectionManagerTests: XCTestCase {
         ssh.mockExecResults["tmux list-sessions"] = "$0:main:2:1740700800"
         let manager = ConnectionManager(sshService: ssh)
 
-        let sessions = try await manager.connect(server: makeServer(), password: "p")
-        XCTAssertEqual(manager.state, .sessionList)
-        XCTAssertEqual(sessions.count, 1)
+        try await manager.connect(server: makeServer(), password: "p")
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
+        XCTAssertEqual(manager.sessions.count, 1)
     }
 
     func testConnectThrowsWhenExecCommandFails() async {
@@ -243,7 +243,7 @@ final class ConnectionManagerTests: XCTestCase {
         let manager = ConnectionManager(sshService: ssh)
 
         do {
-            _ = try await manager.connect(server: makeServer(), password: "p")
+            try await manager.connect(server: makeServer(), password: "p")
             XCTFail("Expected error")
         } catch let error as TmuxError {
             XCTAssertEqual(error, .notInstalled)
@@ -259,8 +259,8 @@ final class ConnectionManagerTests: XCTestCase {
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = "$0:test:1:0"
         let manager = ConnectionManager(sshService: ssh)
-        _ = try await manager.connect(server: makeServer(), password: "p")
-        manager.setStateForTesting(.attached(sessionName: "test"))
+        try await manager.connect(server: makeServer(), password: "p")
+        // connect() now auto-attaches, so state is already .attached
 
         let fetchTask = Task {
             try await manager.fetchScrollback(paneId: "%0")
@@ -281,8 +281,7 @@ final class ConnectionManagerTests: XCTestCase {
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = "$0:test:1:0"
         let manager = ConnectionManager(sshService: ssh)
-        _ = try await manager.connect(server: makeServer(), password: "p")
-        manager.setStateForTesting(.attached(sessionName: "test"))
+        try await manager.connect(server: makeServer(), password: "p")
 
         let fetchTask = Task {
             try await manager.fetchScrollback(paneId: "%0")
@@ -314,8 +313,7 @@ final class ConnectionManagerTests: XCTestCase {
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = "$0:test:1:0"
         let manager = ConnectionManager(sshService: ssh)
-        _ = try await manager.connect(server: makeServer(), password: "p")
-        manager.setStateForTesting(.attached(sessionName: "test"))
+        try await manager.connect(server: makeServer(), password: "p")
 
         // Start first fetch but do not deliver response yet.
         let firstTask = Task {
@@ -343,7 +341,7 @@ final class ConnectionManagerTests: XCTestCase {
     func testConnectionStateEquality() {
         XCTAssertEqual(ConnectionState.disconnected, ConnectionState.disconnected)
         XCTAssertEqual(ConnectionState.connecting, ConnectionState.connecting)
-        XCTAssertEqual(ConnectionState.sessionList, ConnectionState.sessionList)
+        XCTAssertEqual(ConnectionState.reconnecting, ConnectionState.reconnecting)
         XCTAssertEqual(
             ConnectionState.attached(sessionName: "a"),
             ConnectionState.attached(sessionName: "a")

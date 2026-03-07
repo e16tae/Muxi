@@ -90,7 +90,7 @@ final class ConnectionManagerReconnectTests: XCTestCase {
     }
 
     /// Connect a manager to a server (via password) and return it in
-    /// `.sessionList` state.
+    /// `.attached` state (connect now auto-attaches).
     private func connectedManager(
         ssh: ReconnectMockSSHService,
         sessions sessionOutput: String = "$0:main:1:0",
@@ -99,19 +99,19 @@ final class ConnectionManagerReconnectTests: XCTestCase {
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = sessionOutput
         let manager = makeManager(ssh: ssh, maxAttempts: maxAttempts)
-        _ = try await manager.connect(server: makeServer(), password: "pw")
+        try await manager.connect(server: makeServer(), password: "pw")
         return manager
     }
 
     // MARK: - Tests
 
     /// When the first reconnect attempt succeeds, the manager should transition
-    /// to `.sessionList` and reset the attempt counter.
+    /// to `.attached` and reset the attempt counter.
     func testReconnectSucceedsFirstAttempt() async throws {
         let ssh = ReconnectMockSSHService()
         ssh.mockExecResult = "$0:main:1:0"
         let manager = try await connectedManager(ssh: ssh)
-        XCTAssertEqual(manager.state, .sessionList)
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
 
         // Simulate a disconnect event (SSH keepalive timeout).
         ssh.shouldFailConnectCount = 0 // next connect succeeds immediately
@@ -119,7 +119,7 @@ final class ConnectionManagerReconnectTests: XCTestCase {
 
         await manager.reconnect()
 
-        XCTAssertEqual(manager.state, .sessionList)
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
         XCTAssertEqual(manager.reconnectAttempt, 0)
         // connect was called once during initial connect + once during reconnect
         XCTAssertEqual(ssh.connectCallCount, 1)
@@ -133,9 +133,7 @@ final class ConnectionManagerReconnectTests: XCTestCase {
         ssh.mockExecResult = "$0:dev:2:0"
         let manager = try await connectedManager(ssh: ssh, sessions: "$0:dev:2:0")
 
-        // Attach to "dev".
-        let session = manager.sessions.first!
-        try await manager.attachSession(session)
+        // connect() auto-attaches to "dev".
         XCTAssertEqual(manager.state, .attached(sessionName: "dev"))
 
         // Simulate disconnect + reconnect.
@@ -149,15 +147,14 @@ final class ConnectionManagerReconnectTests: XCTestCase {
     }
 
     /// If the manager was attached to "dev" but that session no longer exists
-    /// on the server after reconnecting, it should fall back to `.sessionList`.
-    func testReconnectFallsToSessionListIfSessionGone() async throws {
+    /// on the server after reconnecting, it should attach to the first
+    /// available session.
+    func testReconnectAttachesFirstAvailableIfSessionGone() async throws {
         let ssh = ReconnectMockSSHService()
         ssh.mockExecResult = "$0:dev:1:0"
         let manager = try await connectedManager(ssh: ssh, sessions: "$0:dev:1:0")
 
-        // Attach to "dev".
-        let session = manager.sessions.first!
-        try await manager.attachSession(session)
+        // connect() auto-attaches to "dev".
         XCTAssertEqual(manager.state, .attached(sessionName: "dev"))
 
         // After reconnect the server only has "prod" -- "dev" is gone.
@@ -167,7 +164,8 @@ final class ConnectionManagerReconnectTests: XCTestCase {
 
         await manager.reconnect()
 
-        XCTAssertEqual(manager.state, .sessionList)
+        // Should attach to "prod" (first available)
+        XCTAssertEqual(manager.state, .attached(sessionName: "prod"))
         XCTAssertEqual(manager.reconnectAttempt, 0)
         XCTAssertEqual(manager.sessions.count, 1)
         XCTAssertEqual(manager.sessions[0].name, "prod")
@@ -206,7 +204,7 @@ final class ConnectionManagerReconnectTests: XCTestCase {
 
         // After a successful reconnect the counter is reset.
         XCTAssertEqual(manager.reconnectAttempt, 0)
-        XCTAssertEqual(manager.state, .sessionList)
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
         XCTAssertEqual(ssh.connectCallCount, 3)
     }
 
@@ -235,7 +233,7 @@ final class ConnectionManagerReconnectTests: XCTestCase {
         let manager = makeManager(ssh: ssh)
 
         do {
-            _ = try await manager.connect(server: makeServer(), password: "pw")
+            try await manager.connect(server: makeServer(), password: "pw")
             XCTFail("connect should have thrown")
         } catch {
             XCTAssertEqual(manager.state, .disconnected)
@@ -259,7 +257,7 @@ final class ConnectionManagerReconnectTests: XCTestCase {
 
         // We cannot observe the intermediate state mid-await, but we can
         // verify the final state after successful reconnect.
-        XCTAssertEqual(manager.state, .sessionList)
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
         XCTAssertEqual(ssh.connectCallCount, 2)
     }
 }

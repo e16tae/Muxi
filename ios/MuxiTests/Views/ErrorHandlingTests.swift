@@ -9,19 +9,19 @@ import Testing
 @Suite("BannerStyle Tests")
 struct BannerStyleTests {
 
-    @Test("Error style has red color")
+    @Test("Error style has error color")
     func errorColor() {
-        #expect(BannerStyle.error.color == .red)
+        #expect(BannerStyle.error.color == MuxiTokens.Colors.error)
     }
 
-    @Test("Warning style has orange color")
+    @Test("Warning style has warning color")
     func warningColor() {
-        #expect(BannerStyle.warning.color == .orange)
+        #expect(BannerStyle.warning.color == MuxiTokens.Colors.warning)
     }
 
-    @Test("Info style has blue color")
+    @Test("Info style has info color")
     func infoColor() {
-        #expect(BannerStyle.info.color == .blue)
+        #expect(BannerStyle.info.color == MuxiTokens.Colors.info)
     }
 
     @Test("Error style uses exclamationmark.triangle.fill icon")
@@ -90,7 +90,7 @@ struct ErrorBannerViewTests {
     @Test("Error style is preserved")
     func stylePreserved() {
         let banner = ErrorBannerView(message: "test", style: .info)
-        #expect(banner.style.color == .blue)
+        #expect(banner.style.color == MuxiTokens.Colors.info)
         #expect(banner.style.icon == "info.circle.fill")
     }
 }

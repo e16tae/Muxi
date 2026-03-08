@@ -64,6 +64,8 @@ final class HostKeyMockSSHService: SSHServiceProtocol {
     func writeToChannel(_ data: Data) async throws {
         guard state == .connected else { throw SSHError.notConnected }
     }
+
+    func closeShell() async {}
 }
 
 // MARK: - ConnectionManagerHostKeyTests
@@ -115,7 +117,7 @@ final class ConnectionManagerHostKeyTests: XCTestCase {
         // Wait for the connection to complete.
         try await connectTask.value
 
-        XCTAssertEqual(manager.state, .sessionList)
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
         XCTAssertEqual(server.hostKeyFingerprint, ssh.serverFingerprint)
         XCTAssertNil(manager.pendingFingerprint)
     }
@@ -156,10 +158,10 @@ final class ConnectionManagerHostKeyTests: XCTestCase {
         let manager = ConnectionManager(sshService: ssh)
         let server = makeServer(fingerprint: ssh.serverFingerprint)
 
-        let sessions = try await manager.connect(server: server, password: "p")
+        try await manager.connect(server: server, password: "p")
 
-        XCTAssertEqual(manager.state, .sessionList)
-        XCTAssertEqual(sessions.count, 1)
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
+        XCTAssertEqual(manager.sessions.count, 1)
         // No fingerprint prompt needed.
         XCTAssertNil(manager.pendingFingerprint)
     }
@@ -190,7 +192,7 @@ final class ConnectionManagerHostKeyTests: XCTestCase {
 
         try await connectTask.value
 
-        XCTAssertEqual(manager.state, .sessionList)
+        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
         XCTAssertEqual(server.hostKeyFingerprint, "SHA256:newkey123")
     }
 

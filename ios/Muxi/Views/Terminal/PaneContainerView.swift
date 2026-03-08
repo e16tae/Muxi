@@ -155,7 +155,7 @@ struct PaneContainerView: View {
                                 )
                                 .fill(MuxiTokens.Colors.accentDefault)
                             )
-                            .foregroundStyle(.white)
+                            .foregroundStyle(MuxiTokens.Colors.textPrimary)
                         }
                         .padding(.bottom, MuxiTokens.Spacing.md)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
@@ -265,7 +265,7 @@ struct PaneContainerView: View {
                                             )
                                             .fill(MuxiTokens.Colors.accentDefault)
                                         )
-                                        .foregroundStyle(.white)
+                                        .foregroundStyle(MuxiTokens.Colors.textPrimary)
                                     }
                                     .padding(.bottom, MuxiTokens.Spacing.md)
                                     .transition(.move(edge: .bottom).combined(with: .opacity))

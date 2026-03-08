@@ -172,6 +172,8 @@ struct QuickActionView: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(MuxiTokens.Colors.surfaceBase)
             .navigationTitle("Quick Actions")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -210,7 +212,7 @@ struct QuickActionView: View {
     private func actionRow(_ action: QuickAction) -> some View {
         Label {
             Text(action.title)
-                .foregroundStyle(.primary)
+                .foregroundStyle(MuxiTokens.Colors.textPrimary)
         } icon: {
             Image(systemName: action.icon)
                 .foregroundStyle(.tint)

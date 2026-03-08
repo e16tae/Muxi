@@ -88,7 +88,7 @@ struct TerminalSessionView: View {
                             .font(MuxiTokens.Typography.title)
                             .foregroundStyle(MuxiTokens.Colors.textPrimary)
                         Image(systemName: "chevron.down")
-                            .font(.caption)
+                            .font(MuxiTokens.Typography.caption)
                             .foregroundStyle(MuxiTokens.Colors.textSecondary)
                     }
                 }
@@ -183,8 +183,8 @@ struct TerminalSessionView: View {
             QuickActionButton(onAction: { command in
                 sendTmuxCommand(command)
             })
-            .padding(.trailing, 16)
-            .padding(.bottom, 16)
+            .padding(.trailing, MuxiTokens.Spacing.lg)
+            .padding(.bottom, MuxiTokens.Spacing.lg)
         }
         .onChange(of: panes) { _, newPanes in
             let paneIds = Set(newPanes.map(\.id))
@@ -256,8 +256,9 @@ struct TerminalSessionView: View {
             Spacer()
             ProgressView()
             Text("Attaching to \(sessionName)...")
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
+                .font(MuxiTokens.Typography.caption)
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                .padding(.top, MuxiTokens.Spacing.sm)
             Spacer()
         }
         .frame(maxWidth: .infinity)

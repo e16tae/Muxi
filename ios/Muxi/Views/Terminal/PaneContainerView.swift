@@ -187,7 +187,7 @@ struct PaneContainerView: View {
                         onPaneTapped?(panes[index].id)
                     } label: {
                         Text("Pane \(index + 1)")
-                            .font(.caption)
+                            .font(MuxiTokens.Typography.caption)
                             .padding(.horizontal, MuxiTokens.Spacing.md)
                             .padding(.vertical, MuxiTokens.Spacing.xs)
                             .background(
@@ -198,9 +198,10 @@ struct PaneContainerView: View {
                             .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
                     }
                     .buttonStyle(.plain)
+                    .accessibilityHint("Switch to this pane")
                 }
             }
-            .padding(.horizontal)
+            .padding(.horizontal, MuxiTokens.Spacing.lg)
         }
         .frame(height: 36)
         .background(MuxiTokens.Colors.surfaceRaised)

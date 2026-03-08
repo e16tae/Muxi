@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var showingPasswordPrompt = false
     @State private var previousAttachedSession: String?
     @State private var tmuxGuideReason: TmuxInstallGuideView.Reason?
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     var body: some View {
         ZStack {
@@ -72,7 +73,7 @@ struct ContentView: View {
                         message: error,
                         style: .error,
                         onDismiss: {
-                            withAnimation {
+                            withAnimation(MuxiTokens.Motion.resolved(reduceMotion: accessibilityReduceMotion).subtle) {
                                 showErrorBanner = false
                                 errorMessage = nil
                             }
@@ -83,14 +84,14 @@ struct ContentView: View {
                             }
                         } : nil
                     )
-                    .padding(.top, 8)
+                    .padding(.top, MuxiTokens.Spacing.sm)
                     Spacer()
                 }
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .animation(.easeInOut(duration: 0.3), value: connectionManager.state)
-        .animation(.easeInOut(duration: 0.25), value: showErrorBanner)
+        .muxiAnimation(\.transition, value: connectionManager.state)
+        .muxiAnimation(\.subtle, value: showErrorBanner)
         .sheet(item: $tmuxGuideReason) { reason in
             TmuxInstallGuideView(
                 reason: reason,
@@ -179,6 +180,7 @@ struct ContentView: View {
                     } label: {
                         Image(systemName: "gearshape")
                     }
+                    .accessibilityLabel("Settings")
                 }
             }
         }
@@ -189,7 +191,7 @@ struct ContentView: View {
     @ViewBuilder
     private var connectingOverlay: some View {
         ZStack {
-            Color.black.opacity(0.3)
+            MuxiTokens.Colors.surfaceBase.opacity(0.7)
                 .ignoresSafeArea()
 
             VStack(spacing: MuxiTokens.Spacing.lg) {
@@ -236,7 +238,7 @@ struct ContentView: View {
                     showingPasswordPrompt = true
                 } else {
                     // Keychain error (corrupt data, OS error) — show error banner.
-                    withAnimation {
+                    withAnimation(MuxiTokens.Motion.resolved(reduceMotion: accessibilityReduceMotion).subtle) {
                         errorMessage = "Keychain error: \(error.localizedDescription)"
                         showErrorBanner = true
                     }
@@ -250,12 +252,12 @@ struct ContentView: View {
                 connectToServer(server)
             } catch {
                 if case KeychainError.itemNotFound = error {
-                    withAnimation {
+                    withAnimation(MuxiTokens.Motion.resolved(reduceMotion: accessibilityReduceMotion).subtle) {
                         errorMessage = "SSH key not found. Import a key in Settings."
                         showErrorBanner = true
                     }
                 } else {
-                    withAnimation {
+                    withAnimation(MuxiTokens.Motion.resolved(reduceMotion: accessibilityReduceMotion).subtle) {
                         errorMessage = "Keychain error: \(error.localizedDescription)"
                         showErrorBanner = true
                     }
@@ -290,7 +292,7 @@ struct ContentView: View {
                 // Host key verification was handled (and rejected) via the
                 // fingerprint alert. No additional error banner needed.
             } catch {
-                withAnimation {
+                withAnimation(MuxiTokens.Motion.resolved(reduceMotion: accessibilityReduceMotion).subtle) {
                     errorMessage = "Connection failed: \(error.localizedDescription)"
                     showErrorBanner = true
                 }

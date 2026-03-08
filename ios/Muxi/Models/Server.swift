@@ -48,6 +48,13 @@ final class Server {
     var authMethod: AuthMethod
     var agentForwarding: Bool
 
+    /// The SHA-256 fingerprint of the server's host key, in OpenSSH format
+    /// (e.g., `"SHA256:xyzabc123..."`).
+    ///
+    /// `nil` means this is a first connection and TOFU verification is needed.
+    /// Stored in SwiftData (not a secret — safe for model storage).
+    var hostKeyFingerprint: String?
+
     init(
         id: UUID = UUID(),
         name: String,
@@ -55,7 +62,8 @@ final class Server {
         port: UInt16 = 22,
         username: String,
         authMethod: AuthMethod,
-        agentForwarding: Bool = false
+        agentForwarding: Bool = false,
+        hostKeyFingerprint: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -64,5 +72,6 @@ final class Server {
         self.username = username
         self.authMethod = authMethod
         self.agentForwarding = agentForwarding
+        self.hostKeyFingerprint = hostKeyFingerprint
     }
 }

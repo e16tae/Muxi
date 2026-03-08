@@ -107,7 +107,7 @@ class MockSSHService: SSHServiceProtocol {
     /// If set, `execCommand` throws this error instead of returning a result.
     var mockExecError: Error?
 
-    func connect(host: String, port: UInt16, username: String, auth: SSHAuth) async throws {
+    func connect(host: String, port: UInt16, username: String, auth: SSHAuth, expectedFingerprint: String? = nil) async throws {
         state = .connected
     }
 

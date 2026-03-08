@@ -124,6 +124,22 @@ final class ConnectionManager {
     /// Zero when not reconnecting.
     private(set) var reconnectAttempt: Int = 0
 
+    // MARK: - Host Key Verification (TOFU)
+
+    /// The fingerprint awaiting user approval on first connection.
+    /// Non-nil triggers the TOFU confirmation UI.
+    var pendingFingerprint: String?
+
+    /// Callback invoked with `true` (trust) or `false` (reject) after
+    /// the user responds to the TOFU fingerprint prompt.
+    var pendingFingerprintAction: ((Bool) -> Void)?
+
+    /// Whether the fingerprint mismatch alert should be shown.
+    var showFingerprintMismatchAlert = false
+
+    /// The expected and actual fingerprints when a mismatch is detected.
+    var mismatchFingerprint: (expected: String, actual: String)?
+
     /// Create a connection manager, optionally injecting an SSH service
     /// implementation for testing.
     init(
@@ -168,7 +184,8 @@ final class ConnectionManager {
                 host: server.host,
                 port: server.port,
                 username: server.username,
-                auth: auth
+                auth: auth,
+                expectedFingerprint: server.hostKeyFingerprint
             )
             logger.info("SSH connected, querying tmux sessions...")
 
@@ -208,8 +225,86 @@ final class ConnectionManager {
             try await performAttach(sessionName: targetSession)
             lastSessionStore.save(sessionName: targetSession, forServerID: serverID)
 
+        } catch let error as SSHHostKeyError {
+            try await handleHostKeyError(error, server: server, password: password)
         } catch {
             logger.error("Connection failed: \(error)")
+            state = .disconnected
+            currentServer = nil
+            cachedAuth = nil
+            throw error
+        }
+    }
+
+    /// Handle host key verification errors during the connect flow.
+    ///
+    /// For first connections (TOFU), this suspends until the user accepts or
+    /// rejects the fingerprint. For mismatches, it shows a warning alert and
+    /// suspends similarly.
+    private func handleHostKeyError(
+        _ error: SSHHostKeyError,
+        server: Server,
+        password: String?
+    ) async throws {
+        switch error {
+        case .fingerprintVerificationNeeded(let fingerprint):
+            logger.info("First connection — awaiting user fingerprint verification")
+
+            let accepted = await withCheckedContinuation { continuation in
+                pendingFingerprint = fingerprint
+                pendingFingerprintAction = { trusted in
+                    continuation.resume(returning: trusted)
+                }
+            }
+
+            pendingFingerprint = nil
+            pendingFingerprintAction = nil
+
+            if accepted {
+                // Save the trusted fingerprint and retry the connection.
+                server.hostKeyFingerprint = fingerprint
+                logger.info("User accepted fingerprint, retrying connection")
+                state = .disconnected  // Reset so connect() guard passes
+                _ = try await connect(server: server, password: password)
+            } else {
+                logger.info("User rejected fingerprint")
+                state = .disconnected
+                currentServer = nil
+                cachedAuth = nil
+                throw SSHHostKeyError.fingerprintVerificationNeeded(fingerprint: fingerprint)
+            }
+
+        case .fingerprintMismatch(let expected, let actual):
+            logger.warning("Host key mismatch detected — possible MITM attack")
+
+            let accepted = await withCheckedContinuation { continuation in
+                mismatchFingerprint = (expected: expected, actual: actual)
+                showFingerprintMismatchAlert = true
+                pendingFingerprintAction = { trusted in
+                    continuation.resume(returning: trusted)
+                }
+            }
+
+            showFingerprintMismatchAlert = false
+            mismatchFingerprint = nil
+            pendingFingerprintAction = nil
+
+            if accepted {
+                // User accepted the new key — save it and retry.
+                server.hostKeyFingerprint = actual
+                logger.info("User accepted new fingerprint after mismatch warning")
+                state = .disconnected  // Reset so connect() guard passes
+                _ = try await connect(server: server, password: password)
+            } else {
+                logger.info("User rejected mismatched fingerprint — disconnecting")
+                state = .disconnected
+                currentServer = nil
+                cachedAuth = nil
+                throw SSHHostKeyError.fingerprintMismatch(expected: expected, actual: actual)
+            }
+
+        case .hostKeyNotAvailable:
+            logger.error("Host key not available after handshake")
             state = .disconnected
             currentServer = nil
             cachedAuth = nil
@@ -537,11 +632,15 @@ final class ConnectionManager {
         for attempt in 1...maxReconnectAttempts {
             reconnectAttempt = attempt
             do {
+                // Re-establish SSH connection using cached credentials.
+                // Pass the stored fingerprint so we skip the TOFU prompt
+                // during reconnect (the user already trusted this server).
                 try await sshService.connect(
                     host: server.host,
                     port: server.port,
                     username: server.username,
-                    auth: auth
+                    auth: auth,
+                    expectedFingerprint: server.hostKeyFingerprint
                 )
 
                 try await refreshSessions()

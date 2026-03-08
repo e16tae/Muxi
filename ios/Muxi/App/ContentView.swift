@@ -100,6 +100,50 @@ struct ContentView: View {
                 }
             )
         }
+        .alert(
+            "New Server Fingerprint",
+            isPresented: Binding(
+                get: { connectionManager.pendingFingerprint != nil },
+                set: { newValue in
+                    if !newValue {
+                        connectionManager.pendingFingerprintAction?(false)
+                    }
+                }
+            )
+        ) {
+            Button("Cancel", role: .cancel) {
+                connectionManager.pendingFingerprintAction?(false)
+            }
+            Button("Trust") {
+                connectionManager.pendingFingerprintAction?(true)
+            }
+        } message: {
+            if let fingerprint = connectionManager.pendingFingerprint {
+                Text("This is your first connection to \(selectedServer?.name ?? selectedServer?.host ?? "this server").\n\nVerify the server fingerprint:\n\(fingerprint)\n\nDo you trust this server?")
+            }
+        }
+        .alert(
+            "Host Key Changed",
+            isPresented: Binding(
+                get: { connectionManager.showFingerprintMismatchAlert },
+                set: { newValue in
+                    if !newValue {
+                        connectionManager.pendingFingerprintAction?(false)
+                    }
+                }
+            )
+        ) {
+            Button("Disconnect", role: .cancel) {
+                connectionManager.pendingFingerprintAction?(false)
+            }
+            Button("Accept New Key", role: .destructive) {
+                connectionManager.pendingFingerprintAction?(true)
+            }
+        } message: {
+            if let mismatch = connectionManager.mismatchFingerprint {
+                Text("The host key for \(selectedServer?.name ?? selectedServer?.host ?? "this server") has changed. This could indicate a man-in-the-middle attack.\n\nPrevious: \(mismatch.expected)\nCurrent: \(mismatch.actual)\n\nAccepting this change is dangerous unless you know the server was recently reinstalled.")
+            }
+        }
         .alert("Enter Password", isPresented: $showingPasswordPrompt) {
             SecureField("Password", text: $passwordPrompt)
             Button("Connect") {
@@ -242,6 +286,9 @@ struct ContentView: View {
                 case .versionTooOld(let detected):
                     tmuxGuideReason = .versionTooOld(detected: detected)
                 }
+            } catch is SSHHostKeyError {
+                // Host key verification was handled (and rejected) via the
+                // fingerprint alert. No additional error banner needed.
             } catch {
                 withAnimation {
                     errorMessage = "Connection failed: \(error.localizedDescription)"

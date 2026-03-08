@@ -1,5 +1,6 @@
 import Foundation
 import CLibSSH2
+import CryptoKit
 import os
 
 private let sshLog = Logger(subsystem: "com.muxi.app", category: "SSH")
@@ -56,6 +57,38 @@ enum SSHError: Error, LocalizedError, Sendable {
     }
 }
 
+// MARK: - SSHHostKeyError
+
+/// Errors related to SSH host key verification (TOFU pattern).
+///
+/// These are thrown during the handshake phase to let ``ConnectionManager``
+/// decide how to proceed — prompt the user for first-time trust, or warn
+/// about a changed host key.
+enum SSHHostKeyError: Error, LocalizedError, Equatable {
+    /// First connection to this server. The caller should present the
+    /// fingerprint to the user for verification before proceeding.
+    case fingerprintVerificationNeeded(fingerprint: String)
+
+    /// The server's host key has changed since the last connection.
+    /// This could indicate a man-in-the-middle attack.
+    case fingerprintMismatch(expected: String, actual: String)
+
+    /// The host key was not available after a successful handshake
+    /// (should not happen in practice).
+    case hostKeyNotAvailable
+
+    var errorDescription: String? {
+        switch self {
+        case .fingerprintVerificationNeeded(let fingerprint):
+            return "Host key verification needed: \(fingerprint)"
+        case .fingerprintMismatch(let expected, let actual):
+            return "Host key changed! Expected \(expected), got \(actual)"
+        case .hostKeyNotAvailable:
+            return "Could not retrieve host key from the server"
+        }
+    }
+}
+
 // MARK: - SSHChannel
 
 /// A bidirectional channel over an SSH connection (e.g. a shell or exec
@@ -83,7 +116,19 @@ protocol SSHServiceProtocol: AnyObject {
     var state: SSHConnectionState { get }
 
     /// Open an SSH connection to the given host.
-    func connect(host: String, port: UInt16, username: String, auth: SSHAuth) async throws
+    ///
+    /// - Parameters:
+    ///   - host: The hostname or IP address.
+    ///   - port: The SSH port (typically 22).
+    ///   - username: The username for authentication.
+    ///   - auth: The authentication credentials.
+    ///   - expectedFingerprint: The previously stored host key fingerprint.
+    ///     Pass `nil` for first connections (triggers TOFU verification).
+    ///
+    /// - Throws: ``SSHHostKeyError/fingerprintVerificationNeeded(fingerprint:)``
+    ///   on first connection, ``SSHHostKeyError/fingerprintMismatch(expected:actual:)``
+    ///   if the host key has changed, or other ``SSHError`` for connection failures.
+    func connect(host: String, port: UInt16, username: String, auth: SSHAuth, expectedFingerprint: String?) async throws
 
     /// Tear down the current connection.
     func disconnect()
@@ -246,7 +291,8 @@ actor SSHService: SSHServiceProtocol {
         host: String,
         port: UInt16,
         username: String,
-        auth: SSHAuth
+        auth: SSHAuth,
+        expectedFingerprint: String? = nil
     ) async throws {
         // Clean up any previous connection first.
         if state != .disconnected {
@@ -344,6 +390,26 @@ actor SSHService: SSHServiceProtocol {
                 }
                 throw SSHError.connectionFailed(
                     "SSH handshake failed: \(msg)"
+                )
+            }
+
+            // Verify host key (TOFU pattern).
+            let actualFingerprint = try computeHostKeyFingerprint(session: sess)
+            sshLog.debug("Host key fingerprint: \(actualFingerprint, privacy: .private)")
+
+            if let expected = expectedFingerprint {
+                // We have a stored fingerprint — verify it matches.
+                if expected != actualFingerprint {
+                    cleanupSession()
+                    throw SSHHostKeyError.fingerprintMismatch(
+                        expected: expected, actual: actualFingerprint
+                    )
+                }
+            } else {
+                // First connection — signal the caller to prompt the user.
+                cleanupSession()
+                throw SSHHostKeyError.fingerprintVerificationNeeded(
+                    fingerprint: actualFingerprint
                 )
             }
 
@@ -576,6 +642,26 @@ actor SSHService: SSHServiceProtocol {
     }
 
     // MARK: - Private Helpers
+
+    /// Compute the SHA-256 fingerprint of the server's host key.
+    ///
+    /// Returns a string in OpenSSH format: `"SHA256:<base64>"`.
+    ///
+    /// - Parameter session: The libssh2 session (after successful handshake).
+    /// - Throws: ``SSHHostKeyError/hostKeyNotAvailable`` if the key cannot
+    ///   be retrieved.
+    private func computeHostKeyFingerprint(session sess: OpaquePointer) throws -> String {
+        var keyLength = 0
+        var keyType: Int32 = 0
+        guard let keyPtr = libssh2_session_hostkey(sess, &keyLength, &keyType) else {
+            throw SSHHostKeyError.hostKeyNotAvailable
+        }
+
+        let keyData = Data(bytes: keyPtr, count: keyLength)
+        let hash = SHA256.hash(data: keyData)
+        let base64 = Data(hash).base64EncodedString()
+        return "SHA256:\(base64)"
+    }
 
     /// Authenticate with the remote server using the provided credentials.
     private func authenticate(

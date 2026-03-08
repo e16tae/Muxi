@@ -385,7 +385,8 @@ final class ConnectionManager {
     /// Switch to a different tmux session from within the terminal.
     /// Closes the current control mode channel and reattaches to the new session.
     func switchSession(to sessionName: String) async throws {
-        guard case .attached = state else { return }
+        guard case .attached(let currentSession) = state else { return }
+        logger.info("Switching session: '\(currentSession)' → '\(sessionName)'")
 
         // Cancel any pending scrollback fetch to avoid leaking the continuation.
         if let continuation = scrollbackContinuation {
@@ -418,9 +419,26 @@ final class ConnectionManager {
     }
 
     /// Create a new tmux session and switch to it.
+    ///
+    /// When a shell is active (non-blocking mode), `execCommand` cannot open
+    /// new channels. Instead, the create command is sent through the tmux
+    /// control mode channel, and the session list is updated locally.
     func createAndSwitchToNewSession(name: String) async throws {
-        _ = try await sshService.execCommand("tmux new-session -d -s \(name.shellEscaped())")
-        try await refreshSessions()
+        guard case .attached = state else { return }
+
+        // Create session via tmux control mode channel.
+        let cmd = "new-session -d -s \(name.shellEscaped())\n"
+        logger.info("Creating new session '\(name)' via control channel")
+        try await sshService.writeToChannel(Data(cmd.utf8))
+
+        // Add to local session list (execCommand-based refresh doesn't work
+        // while a shell is active).
+        if !sessions.contains(where: { $0.name == name }) {
+            sessions.append(TmuxSession(
+                id: "", name: name, windows: [], createdAt: Date(), lastActivity: Date()
+            ))
+        }
+
         try await switchSession(to: name)
     }
 
@@ -447,19 +465,26 @@ final class ConnectionManager {
     // MARK: - tmux Session CRUD
 
     /// Create a new detached tmux session with the given name on the remote
-    /// server, then refresh the session list.
+    /// server. Uses the tmux control mode channel (execCommand doesn't work
+    /// while a shell is active due to non-blocking mode).
     func createTmuxSession(name: String) async throws {
         guard case .attached = state else { return }
-        _ = try await sshService.execCommand("tmux new-session -d -s \(name.shellEscaped())")
-        try await refreshSessions()
+        let cmd = "new-session -d -s \(name.shellEscaped())\n"
+        try await sshService.writeToChannel(Data(cmd.utf8))
+        if !sessions.contains(where: { $0.name == name }) {
+            sessions.append(TmuxSession(
+                id: "", name: name, windows: [], createdAt: Date(), lastActivity: Date()
+            ))
+        }
     }
 
-    /// Kill the specified tmux session on the remote server, then refresh
-    /// the session list.
+    /// Kill the specified tmux session on the remote server.
+    /// Uses the tmux control mode channel.
     func deleteTmuxSession(_ session: TmuxSession) async throws {
         guard case .attached = state else { return }
-        _ = try await sshService.execCommand("tmux kill-session -t \(session.name.shellEscaped())")
-        try await refreshSessions()
+        let cmd = "kill-session -t \(session.name.shellEscaped())\n"
+        try await sshService.writeToChannel(Data(cmd.utf8))
+        sessions.removeAll { $0.name == session.name }
     }
 
     // MARK: - Reconnect
@@ -724,7 +749,15 @@ final class ConnectionManager {
 
     /// Re-query the remote server for the current list of tmux sessions
     /// and update the ``sessions`` array.
+    ///
+    /// Only works when no shell channel is active (execCommand requires
+    /// blocking mode). Called during connect() and reconnect() before
+    /// performAttach(). Skipped silently when a shell is active.
     func refreshSessions() async throws {
+        guard activeChannel == nil else {
+            logger.info("Skipping refreshSessions — shell channel active")
+            return
+        }
         let output = try await sshService.execCommand(
             "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}'"
         )

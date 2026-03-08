@@ -59,7 +59,14 @@ struct TerminalSessionView: View {
                     ForEach(connectionManager.sessions) { session in
                         Button {
                             guard session.name != sessionName else { return }
-                            Task { try? await connectionManager.switchSession(to: session.name) }
+                            Task {
+                                do {
+                                    try await connectionManager.switchSession(to: session.name)
+                                    logger.info("Switched to session: \(session.name)")
+                                } catch {
+                                    logger.error("Failed to switch to '\(session.name)': \(error.localizedDescription)")
+                                }
+                            }
                         } label: {
                             if session.name == sessionName {
                                 Label(session.name, systemImage: "checkmark")
@@ -197,12 +204,16 @@ struct TerminalSessionView: View {
                 let name = newSessionName.trimmingCharacters(in: .whitespaces)
                 newSessionName = ""
                 guard !name.isEmpty else { return }
-                Task { try? await connectionManager.createAndSwitchToNewSession(name: name) }
+                Task {
+                    do {
+                        try await connectionManager.createAndSwitchToNewSession(name: name)
+                        logger.info("Created and switched to session: \(name)")
+                    } catch {
+                        logger.error("Failed to create session '\(name)': \(error.localizedDescription)")
+                    }
+                }
             }
             Button("Cancel", role: .cancel) { newSessionName = "" }
-        }
-        .task(id: sessionName) {
-            _ = try? await connectionManager.refreshSessions()
         }
     }
 

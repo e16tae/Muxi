@@ -30,7 +30,6 @@ struct TerminalSessionView: View {
             return PaneContainerView.PaneInfo(
                 id: paneId,
                 buffer: buffer,
-                channel: connectionManager.activeChannel,
                 x: parsedPane.x,
                 y: parsedPane.y,
                 width: parsedPane.width,

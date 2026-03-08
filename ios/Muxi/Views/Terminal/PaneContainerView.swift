@@ -82,7 +82,6 @@ struct PaneContainerView: View {
         /// tmux pane identifier, e.g. "%0", "%1".
         let id: String
         let buffer: TerminalBuffer
-        var channel: SSHChannel?
         // Layout from tmux (used for iPad split view positioning).
         var x: Int = 0
         var y: Int = 0
@@ -127,7 +126,6 @@ struct PaneContainerView: View {
                 TerminalView(
                     buffer: pane.buffer,
                     theme: theme,
-                    channel: pane.channel,
                     onPaste: onPaste,
                     fontSize: fontSize,
                     scrollbackBuffer: scrollbackBuffer,
@@ -227,7 +225,6 @@ struct PaneContainerView: View {
                         TerminalView(
                             buffer: pane.buffer,
                             theme: theme,
-                            channel: pane.channel,
                             onPaste: onPaste,
                             fontSize: fontSize,
                             scrollbackBuffer: scrollbackBuffer,

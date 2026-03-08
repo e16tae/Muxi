@@ -9,7 +9,6 @@ import MetalKit
 struct TerminalView: UIViewRepresentable {
     let buffer: TerminalBuffer
     let theme: Theme
-    var channel: SSHChannel?
     var onPaste: ((String) -> Void)?
     var fontSize: CGFloat = 14
 
@@ -22,7 +21,7 @@ struct TerminalView: UIViewRepresentable {
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
-            buffer: buffer, channel: channel, theme: theme,
+            buffer: buffer, theme: theme,
             onPaste: onPaste,
             onScrollOffsetChanged: onScrollOffsetChanged
         )
@@ -106,7 +105,6 @@ struct TerminalView: UIViewRepresentable {
 
     func updateUIView(_ mtkView: MTKView, context: Context) {
         // Update coordinator references in case they changed (e.g. after reconnect)
-        context.coordinator.channel = channel
         context.coordinator.onPaste = onPaste
 
         // Update scrollback state on renderer.
@@ -167,7 +165,6 @@ struct TerminalView: UIViewRepresentable {
     /// the system edit menu.
     class Coordinator: NSObject, UIEditMenuInteractionDelegate {
         let buffer: TerminalBuffer
-        var channel: SSHChannel?
         var renderer: TerminalRenderer?
         weak var mtkView: MTKView?
         var currentTheme: Theme
@@ -184,20 +181,13 @@ struct TerminalView: UIViewRepresentable {
         var cellWidth: CGFloat = 0
         private var accumulatedPanDelta: CGFloat = 0
 
-        init(buffer: TerminalBuffer, channel: SSHChannel?, theme: Theme,
+        init(buffer: TerminalBuffer, theme: Theme,
              onPaste: ((String) -> Void)?,
              onScrollOffsetChanged: ((Int) -> Void)?) {
             self.buffer = buffer
-            self.channel = channel
             self.currentTheme = theme
             self.onPaste = onPaste
             self.onScrollOffsetChanged = onScrollOffsetChanged
-        }
-
-        /// Send text input to the SSH channel.
-        func sendInput(_ text: String) {
-            guard let data = text.data(using: .utf8) else { return }
-            try? channel?.write(data)
         }
 
         /// Request a redraw of the terminal view. Call this after feeding

@@ -29,9 +29,11 @@ struct ExtendedKeyboardView: View {
             modifierButton("Ctrl", active: inputHandler.ctrlActive) {
                 inputHandler.toggleCtrl()
             }
+            .accessibilityValue(inputHandler.ctrlActive ? "Active" : "Inactive")
             modifierButton("Alt", active: inputHandler.altActive) {
                 inputHandler.toggleAlt()
             }
+            .accessibilityValue(inputHandler.altActive ? "Active" : "Inactive")
 
             Divider()
                 .frame(height: 24)

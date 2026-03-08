@@ -19,7 +19,7 @@ struct QuickActionButton: View {
             showingActions = true
         } label: {
             Image(systemName: "bolt.fill")
-                .font(.system(size: 20, weight: .semibold))
+                .font(MuxiTokens.Typography.title).fontWeight(.semibold)
                 .foregroundStyle(MuxiTokens.Colors.textPrimary)
                 .frame(width: 52, height: 52)
                 .background(Circle().fill(MuxiTokens.Colors.accentDefault))

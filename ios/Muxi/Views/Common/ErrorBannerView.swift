@@ -61,12 +61,12 @@ struct ErrorBannerView: View {
                 // Leading icon
                 Image(systemName: style.icon)
                     .foregroundStyle(style.color)
-                    .font(.body)
+                    .font(MuxiTokens.Typography.body)
                     .accessibilityHidden(true)
 
                 // Message text
                 Text(message)
-                    .font(.subheadline)
+                    .font(MuxiTokens.Typography.label)
                     .foregroundStyle(MuxiTokens.Colors.textPrimary)
                     .multilineTextAlignment(.leading)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -77,7 +77,7 @@ struct ErrorBannerView: View {
                         onDismiss()
                     } label: {
                         Image(systemName: "xmark")
-                            .font(.caption.weight(.semibold))
+                            .font(MuxiTokens.Typography.caption).fontWeight(.semibold)
                             .foregroundStyle(MuxiTokens.Colors.textSecondary)
                     }
                     .buttonStyle(.plain)
@@ -91,7 +91,7 @@ struct ErrorBannerView: View {
                     onRetry()
                 } label: {
                     Text("Retry")
-                        .font(.subheadline.weight(.medium))
+                        .font(MuxiTokens.Typography.label).fontWeight(.medium)
                         .foregroundStyle(style.color)
                 }
                 .buttonStyle(.plain)

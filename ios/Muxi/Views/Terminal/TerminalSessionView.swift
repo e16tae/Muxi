@@ -91,7 +91,7 @@ struct TerminalSessionView: View {
                 QuickActionButton(onAction: { command in
                     sendTmuxCommand(command)
                 })
-                .padding(.trailing, 16)
+                .padding(.trailing, MuxiTokens.Spacing.lg)
                 .padding(.bottom, 60)
             }
             .toolbar {
@@ -149,8 +149,9 @@ struct TerminalSessionView: View {
             Spacer()
             ProgressView()
             Text("Attaching to \(sessionName)...")
-                .foregroundStyle(.secondary)
-                .padding(.top, 8)
+                .font(MuxiTokens.Typography.caption)
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                .padding(.top, MuxiTokens.Spacing.sm)
             Spacer()
         }
         .frame(maxWidth: .infinity)

@@ -48,11 +48,11 @@ struct ReconnectingOverlay: View {
                     .tint(MuxiTokens.Colors.textPrimary)
 
                 Text("Reconnecting...")
-                    .font(.headline)
+                    .font(MuxiTokens.Typography.title)
                     .foregroundStyle(MuxiTokens.Colors.textPrimary)
 
                 Text(attemptText)
-                    .font(.subheadline)
+                    .font(MuxiTokens.Typography.label)
                     .foregroundStyle(MuxiTokens.Colors.textSecondary)
 
                 if let onCancel {
@@ -60,7 +60,7 @@ struct ReconnectingOverlay: View {
                         onCancel()
                     } label: {
                         Text("Cancel")
-                            .font(.subheadline.weight(.medium))
+                            .font(MuxiTokens.Typography.label).fontWeight(.medium)
                             .foregroundStyle(MuxiTokens.Colors.textPrimary)
                             .padding(.horizontal, MuxiTokens.Spacing.xl)
                             .padding(.vertical, MuxiTokens.Spacing.sm)
@@ -118,7 +118,7 @@ struct TmuxInstallGuideView: View {
                     installSection
                     verifySection
                 }
-                .padding()
+                .padding(MuxiTokens.Spacing.lg)
             }
             .navigationTitle("tmux Setup")
             .navigationBarTitleDisplayMode(.inline)
@@ -148,10 +148,10 @@ struct TmuxInstallGuideView: View {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(MuxiTokens.Colors.warning)
             }
-            .font(.headline)
+            .font(MuxiTokens.Typography.title)
 
             Text(descriptionText)
-                .font(.subheadline)
+                .font(MuxiTokens.Typography.label)
                 .foregroundStyle(MuxiTokens.Colors.textSecondary)
         }
     }
@@ -160,7 +160,7 @@ struct TmuxInstallGuideView: View {
     private var installSection: some View {
         VStack(alignment: .leading, spacing: MuxiTokens.Spacing.md) {
             Text("Install or Update tmux")
-                .font(.subheadline.weight(.semibold))
+                .font(MuxiTokens.Typography.label).fontWeight(.semibold)
 
             commandBlock(label: "Ubuntu / Debian", command: "sudo apt update && sudo apt install -y tmux")
             commandBlock(label: "CentOS / RHEL", command: "sudo yum install -y tmux")
@@ -173,12 +173,12 @@ struct TmuxInstallGuideView: View {
     private var verifySection: some View {
         VStack(alignment: .leading, spacing: MuxiTokens.Spacing.md) {
             Text("Verify Installation")
-                .font(.subheadline.weight(.semibold))
+                .font(MuxiTokens.Typography.label).fontWeight(.semibold)
 
             commandBlock(label: "Check version", command: "tmux -V")
 
             Text("Muxi requires tmux \(Self.minimumVersion) or later.")
-                .font(.caption)
+                .font(MuxiTokens.Typography.caption)
                 .foregroundStyle(MuxiTokens.Colors.textSecondary)
         }
     }
@@ -198,7 +198,7 @@ struct TmuxInstallGuideView: View {
     private func commandBlock(label: String, command: String) -> some View {
         VStack(alignment: .leading, spacing: MuxiTokens.Spacing.xs) {
             Text(label)
-                .font(.caption)
+                .font(MuxiTokens.Typography.caption)
                 .foregroundStyle(MuxiTokens.Colors.textSecondary)
 
             Text(command)

@@ -192,9 +192,11 @@ final class ConnectionManager {
             // Check tmux availability before querying sessions.
             try await checkTmuxAvailability()
 
-            // Query tmux sessions via a formatted list-sessions command.
+            // Query tmux sessions. Use server-side timeout to guard against
+            // a stuck tmux server socket (the command hangs if the tmux
+            // server process is zombie/unresponsive).
             let output = try await sshService.execCommand(
-                "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}'"
+                "timeout 5 tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}' 2>/dev/null || true"
             )
             sessions = TmuxControlService.parseFormattedSessionList(output)
             logger.info("Found \(self.sessions.count) tmux sessions")
@@ -211,13 +213,14 @@ final class ConnectionManager {
                 targetSession = first.name
                 logger.info("Attaching to first session: \(targetSession)")
             } else {
-                // No sessions exist — create one
-                _ = try await sshService.execCommand("tmux new-session -d -s \("main".shellEscaped())")
+                // No sessions or tmux server was stuck — kill stale server and create fresh.
+                logger.info("No sessions found, creating new session...")
+                _ = try await sshService.execCommand("tmux kill-server 2>/dev/null; tmux new-session -d -s \("main".shellEscaped())")
                 targetSession = "main"
                 logger.info("Created new session: main")
                 // Refresh to populate sessions array
                 let refreshed = try await sshService.execCommand(
-                    "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}'"
+                    "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}' 2>/dev/null || true"
                 )
                 sessions = TmuxControlService.parseFormattedSessionList(refreshed)
             }
@@ -252,7 +255,10 @@ final class ConnectionManager {
 
             let accepted = await withCheckedContinuation { continuation in
                 pendingFingerprint = fingerprint
+                var resumed = false
                 pendingFingerprintAction = { trusted in
+                    guard !resumed else { return }
+                    resumed = true
                     continuation.resume(returning: trusted)
                 }
             }
@@ -262,10 +268,14 @@ final class ConnectionManager {
 
             if accepted {
                 // Save the trusted fingerprint and retry the connection.
+                // SSHService.connect() internally calls performDisconnect()
+                // when state != .disconnected, so no external disconnect needed.
+                // DO NOT call sshService.disconnect() here — it fires an
+                // unstructured Task that races with the reconnect.
                 server.hostKeyFingerprint = fingerprint
                 logger.info("User accepted fingerprint, retrying connection")
                 state = .disconnected  // Reset so connect() guard passes
-                _ = try await connect(server: server, password: password)
+                try await connect(server: server, password: password)
             } else {
                 logger.info("User rejected fingerprint")
                 state = .disconnected
@@ -280,7 +290,10 @@ final class ConnectionManager {
             let accepted = await withCheckedContinuation { continuation in
                 mismatchFingerprint = (expected: expected, actual: actual)
                 showFingerprintMismatchAlert = true
+                var resumed = false
                 pendingFingerprintAction = { trusted in
+                    guard !resumed else { return }
+                    resumed = true
                     continuation.resume(returning: trusted)
                 }
             }
@@ -294,7 +307,7 @@ final class ConnectionManager {
                 server.hostKeyFingerprint = actual
                 logger.info("User accepted new fingerprint after mismatch warning")
                 state = .disconnected  // Reset so connect() guard passes
-                _ = try await connect(server: server, password: password)
+                try await connect(server: server, password: password)
             } else {
                 logger.info("User rejected mismatched fingerprint — disconnecting")
                 state = .disconnected
@@ -877,7 +890,7 @@ final class ConnectionManager {
             return
         }
         let output = try await sshService.execCommand(
-            "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}'"
+            "timeout 5 tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}' 2>/dev/null || true"
         )
         sessions = TmuxControlService.parseFormattedSessionList(output)
     }

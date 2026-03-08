@@ -465,8 +465,7 @@ actor SSHService: SSHServiceProtocol {
         guard state == .connected, let sess = session else {
             throw SSHError.notConnected
         }
-
-        // Open a channel for command execution.
+        // Open a channel for command execution (blocking mode).
         guard let channel = libssh2_channel_open_ex(
             sess, "session", 7,
             UInt32(2 * 1024 * 1024),  // LIBSSH2_CHANNEL_WINDOW_DEFAULT
@@ -478,7 +477,7 @@ actor SSHService: SSHServiceProtocol {
             )
         }
 
-        // Run the command on the channel.
+        // Run the command on the channel (blocking mode).
         let runRc = command.withCString { cmdPtr in
             libssh2_channel_process_startup(
                 channel, "exec", 4, cmdPtr, UInt32(command.utf8.count)
@@ -490,14 +489,20 @@ actor SSHService: SSHServiceProtocol {
                 "Command execution failed: \(lastSessionError(sess))"
             )
         }
+        // Switch to non-blocking mode for the read loop so we can enforce
+        // a timeout and avoid blocking the actor thread indefinitely.
+        libssh2_session_set_blocking(sess, 0)
 
-        // Read all stdout into a buffer.
         var output = Data()
         let bufferSize = 4096
         let buffer = UnsafeMutablePointer<CChar>.allocate(capacity: bufferSize)
         defer { buffer.deallocate() }
 
-        while true {
+        let deadline = ContinuousClock.now + .seconds(connectionTimeout)
+        let fd = self.socketFd
+        var readError: (any Error)?
+
+        readLoop: while true {
             let bytesRead = libssh2_channel_read_ex(
                 channel, 0, buffer, bufferSize
             )
@@ -505,24 +510,37 @@ actor SSHService: SSHServiceProtocol {
                 buffer.withMemoryRebound(to: UInt8.self, capacity: Int(bytesRead)) { ptr in
                     output.append(ptr, count: Int(bytesRead))
                 }
-            } else if bytesRead == 0 {
+            } else if bytesRead == kLibSSH2ErrorEAGAIN || bytesRead == 0 {
+                // Check EOF regardless of whether we got EAGAIN or 0 —
+                // in non-blocking mode, EOF can be signaled while read
+                // returns EAGAIN (no more data to read).
                 if libssh2_channel_eof(channel) != 0 {
-                    break
+                    break readLoop
                 }
-                // Avoid tight spin — yield briefly when no data and no EOF
-                try? await Task.sleep(for: .milliseconds(10))
-            } else if bytesRead < 0 {
-                libssh2_channel_close(channel)
-                libssh2_channel_wait_closed(channel)
-                libssh2_channel_free(channel)
-                throw SSHError.channelError("Read failed: \(lastSessionError(sess))")
+                if ContinuousClock.now > deadline {
+                    sshLog.warning("execCommand: timed out after \(self.connectionTimeout)s (received \(output.count) bytes)")
+                    readError = SSHError.timeout
+                    break readLoop
+                }
+                var pollFd = pollfd(fd: fd, events: Int16(POLLIN), revents: 0)
+                poll(&pollFd, 1, 100)
+            } else {
+                sshLog.error("execCommand: read error \(bytesRead): \(self.lastSessionError(sess))")
+                readError = SSHError.channelError(
+                    "Read failed: \(lastSessionError(sess))"
+                )
+                break readLoop
             }
         }
 
-        // Clean up the channel.
+        // Restore blocking mode before channel cleanup so close/wait_closed
+        // don't return EAGAIN.
+        libssh2_session_set_blocking(sess, 1)
         libssh2_channel_close(channel)
         libssh2_channel_wait_closed(channel)
         libssh2_channel_free(channel)
+
+        if let readError { throw readError }
 
         return String(data: output, encoding: .utf8) ?? ""
     }

@@ -96,7 +96,6 @@ final class TmuxControlService {
                     let remainder = String(line[range.upperBound...])
                     tmuxLog.info("DCS detected — entering control mode")
                     if !remainder.isEmpty {
-                        tmuxLog.info("feed line: \(remainder)")
                         handleLine(remainder)
                     }
                     continue
@@ -106,7 +105,6 @@ final class TmuxControlService {
             }
 
             if let line = String(data: lineData, encoding: .utf8) {
-                tmuxLog.info("feed line: \(line)")
                 handleLine(line)
             }
         }
@@ -152,8 +150,6 @@ final class TmuxControlService {
         line.withCString { cLine in
             var msg = TmuxMessage()
             let type = tmux_parse_line(cLine, &msg)
-
-            tmuxLog.info("parsed type=\(type) for line: \(line.prefix(80))")
 
             switch type {
             case TMUX_MSG_OUTPUT:
@@ -230,7 +226,7 @@ final class TmuxControlService {
         let result = tmux_parse_layout(layout, &cPanes, 64, &count)
         guard result == 0 else { return [] }
 
-        return (0..<Int(count)).map { i in
+        return (0..<min(Int(count), 64)).map { i in
             ParsedPane(
                 x: Int(cPanes[i].x),
                 y: Int(cPanes[i].y),

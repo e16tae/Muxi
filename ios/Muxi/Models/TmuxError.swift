@@ -8,12 +8,15 @@ enum TmuxError: Error, LocalizedError, Equatable {
     /// tmux is installed but the version is below the minimum (1.8).
     case versionTooOld(detected: String)
 
+    /// The minimum tmux version required by Muxi.
+    static let minimumTmuxVersion = "1.8"
+
     var errorDescription: String? {
         switch self {
         case .notInstalled:
             return "tmux is not installed on this server."
         case .versionTooOld(let detected):
-            return "tmux \(detected) is too old. Muxi requires tmux \(TmuxInstallGuideView.minimumVersion) or later."
+            return "tmux \(detected) is too old. Muxi requires tmux \(TmuxError.minimumTmuxVersion) or later."
         }
     }
 
@@ -38,7 +41,7 @@ enum TmuxError: Error, LocalizedError, Equatable {
         // Strip trailing non-numeric characters (e.g., "3.3a" -> "3.3").
         let numeric = String(version.prefix(while: { $0.isNumber || $0 == "." }))
         guard let detected = Double(numeric) else { return false }
-        guard let minimum = Double(TmuxInstallGuideView.minimumVersion) else { return false }
+        guard let minimum = Double(TmuxError.minimumTmuxVersion) else { return false }
         return detected >= minimum
     }
 }

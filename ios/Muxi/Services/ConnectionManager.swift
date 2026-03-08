@@ -197,6 +197,9 @@ final class ConnectionManager {
             capturePaneQueue = []
             lastSentSize = (0, 0)
 
+            // Clear credentials from memory while backgrounded.
+            cachedAuth = nil
+
             // Send detach THEN disconnect — ordering guaranteed within same Task.
             // Without this, disconnect() could tear down the channel before detach is sent.
             Task {
@@ -207,6 +210,8 @@ final class ConnectionManager {
             lastBackgroundServer = currentServer
             lastBackgroundSession = nil
             disconnectedByBackground = true
+
+            cachedAuth = nil
 
             sshMonitorTask?.cancel()
             sshMonitorTask = nil
@@ -225,11 +230,24 @@ final class ConnectionManager {
         guard disconnectedByBackground else { return }
         disconnectedByBackground = false
 
-        guard let server = lastBackgroundServer ?? currentServer,
-              cachedAuth != nil else {
+        guard let server = lastBackgroundServer ?? currentServer else {
             lastBackgroundServer = nil
             lastBackgroundSession = nil
             return
+        }
+
+        // Re-query Keychain for credentials cleared during background.
+        if cachedAuth == nil {
+            do {
+                cachedAuth = try resolveAuth(for: server)
+            } catch {
+                // User didn't save password — can't auto-reconnect.
+                logger.info("Cannot re-query credentials from Keychain: \(error.localizedDescription)")
+                lastBackgroundServer = nil
+                lastBackgroundSession = nil
+                state = .disconnected
+                return
+            }
         }
 
         // Restore state needed by reconnect().

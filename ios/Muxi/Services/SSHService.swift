@@ -30,6 +30,16 @@ enum SSHAuth: Sendable {
     case key(privateKey: Data, passphrase: String?)
 }
 
+extension SSHAuth: CustomStringConvertible, CustomDebugStringConvertible {
+    var description: String {
+        switch self {
+        case .password: return "SSHAuth.password(****)"
+        case .key: return "SSHAuth.key(****)"
+        }
+    }
+    var debugDescription: String { description }
+}
+
 // MARK: - SSHError
 
 /// Errors that can occur during SSH operations.
@@ -262,8 +272,25 @@ actor SSHService: SSHServiceProtocol {
                 throw SSHError.connectionFailed("libssh2 initialization failed")
             }
 
-            // Create a TCP socket.
-            let fd = socket(AF_INET, SOCK_STREAM, 0)
+            // Resolve the host first so we know the address family.
+            var hints = addrinfo()
+            hints.ai_family = AF_UNSPEC  // Support both IPv4 and IPv6
+            hints.ai_socktype = SOCK_STREAM
+            var result: UnsafeMutablePointer<addrinfo>?
+            let portString = String(port)
+            let gaiRc = getaddrinfo(host, portString, &hints, &result)
+            guard gaiRc == 0, let addrInfo = result else {
+                let errorMsg = gaiRc != 0
+                    ? String(cString: gai_strerror(gaiRc))
+                    : "No address found"
+                throw SSHError.connectionFailed(
+                    "Host resolution failed: \(errorMsg)"
+                )
+            }
+            defer { freeaddrinfo(result) }
+
+            // Create a TCP socket matching the resolved address family.
+            let fd = socket(addrInfo.pointee.ai_family, SOCK_STREAM, 0)
             guard fd >= 0 else {
                 throw SSHError.connectionFailed("Failed to create socket")
             }
@@ -283,25 +310,6 @@ actor SSHService: SSHServiceProtocol {
             if setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) != 0 {
                 // Non-fatal: proceed without receive timeout
             }
-
-            // Resolve the host.
-            var hints = addrinfo()
-            hints.ai_family = AF_INET
-            hints.ai_socktype = SOCK_STREAM
-            var result: UnsafeMutablePointer<addrinfo>?
-            let portString = String(port)
-            let gaiRc = getaddrinfo(host, portString, &hints, &result)
-            guard gaiRc == 0, let addrInfo = result else {
-                Darwin.close(fd)
-                socketFd = -1
-                let errorMsg = gaiRc != 0
-                    ? String(cString: gai_strerror(gaiRc))
-                    : "No address found"
-                throw SSHError.connectionFailed(
-                    "Host resolution failed: \(errorMsg)"
-                )
-            }
-            defer { freeaddrinfo(result) }
 
             // Connect the socket.
             let connectRc = Darwin.connect(

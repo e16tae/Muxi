@@ -84,6 +84,7 @@ struct TerminalView: UIViewRepresentable {
         context.coordinator.onPaste = onPaste
         let bufferChanged = context.coordinator.renderer?.buffer !== buffer
         context.coordinator.renderer?.buffer = buffer
+        context.coordinator.buffer = buffer
 
         // Re-wire the update callback when the buffer instance changes.
         if bufferChanged {
@@ -118,7 +119,7 @@ struct TerminalView: UIViewRepresentable {
     /// provides methods for sending keyboard input and handling paste via
     /// the system edit menu.
     class Coordinator: NSObject, UIEditMenuInteractionDelegate {
-        let buffer: TerminalBuffer
+        var buffer: TerminalBuffer
         var channel: SSHChannel?
         var renderer: TerminalRenderer?
         weak var mtkView: MTKView?

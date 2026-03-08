@@ -9,8 +9,10 @@ extension String {
     /// control characters via `\uXXXX`.  UTF-8 text passes through
     /// unchanged (tmux handles UTF-8 natively).
     ///
-    /// Note: `#` is not escaped — safe for `set-buffer` which does not
-    /// expand format strings, but not for format-expanding commands.
+    /// WARNING: This function is designed EXCLUSIVELY for `set-buffer` command.
+    /// `#` is intentionally NOT escaped because `set-buffer` does not expand format strings.
+    /// DO NOT use this function with format-expanding commands (display-message, set-option, etc.)
+    /// — for those, `#` must be escaped as `##` to prevent format string injection.
     func tmuxQuoted() -> String {
         var result = "\""
         for scalar in unicodeScalars {

@@ -97,7 +97,8 @@ struct ReconnectingOverlay: View {
 /// version is below the minimum requirement.
 struct TmuxInstallGuideView: View {
     /// The minimum tmux version required by Muxi.
-    static let minimumVersion = "1.8"
+    /// Mirrors ``TmuxError.minimumTmuxVersion`` — the model owns the canonical value.
+    static let minimumVersion = TmuxError.minimumTmuxVersion
 
     /// Whether the guide is being shown because tmux is missing entirely
     /// or because the version is too old.

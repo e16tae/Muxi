@@ -62,7 +62,12 @@ struct ServerEditView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") { save() }
-                        .disabled(name.isEmpty || host.isEmpty || username.isEmpty)
+                        .disabled(
+                            name.isEmpty || host.isEmpty || username.isEmpty
+                            || port == 0
+                            || host.count > 253
+                            || username.contains(" ")
+                        )
                 }
             }
             .onAppear { loadServer() }

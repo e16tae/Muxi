@@ -397,8 +397,9 @@ final class ConnectionManagerTests: XCTestCase {
         try await manager.connect(server: makeServer(), password: "p")
         XCTAssertEqual(manager.state, .attached(sessionName: "work"))
 
-        // Simulate: SSH died — execCommand will throw
+        // Simulate: SSH died — execCommand will throw AND reconnect will fail
         ssh.simulateDisconnect()
+        ssh.mockConnectError = SSHError.notConnected
 
         await manager.reattach()
 

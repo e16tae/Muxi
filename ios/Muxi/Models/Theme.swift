@@ -12,6 +12,11 @@ struct ThemeColor: Codable, Equatable {
     var color: Color {
         Color(red: Double(r) / 255, green: Double(g) / 255, blue: Double(b) / 255)
     }
+
+    /// Convert to a UIKit `UIColor`.
+    var uiColor: UIColor {
+        UIColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: 1)
+    }
 }
 
 // MARK: - Theme

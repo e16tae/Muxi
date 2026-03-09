@@ -201,7 +201,7 @@ struct TerminalInputView: UIViewRepresentable {
                 width: UIScreen.main.bounds.width, height: 44
             )
             hostingController.view.autoresizingMask = [.flexibleWidth]
-            hostingController.view.backgroundColor = .clear
+            hostingController.view.backgroundColor = theme.background.uiColor
             view.setInputAccessoryView(hostingController.view)
             context.coordinator.accessoryHostingController = hostingController
         }

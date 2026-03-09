@@ -25,6 +25,7 @@ targets:
         excludes:
           - "Resources/Themes/**"
           - "Resources/Fonts/**"
+          - "Resources/AppIcon/**"
       - path: Muxi/Resources/Themes
         type: folder
         buildPhase: resources
@@ -44,7 +45,9 @@ targets:
         MARKETING_VERSION: "0.1.0"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_EMIT_LOC_STRINGS: "YES"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: J8Z62WAPV6
         CODE_SIGN_ENTITLEMENTS: Muxi/Muxi.entitlements
     info:
       path: Muxi/Info.plist

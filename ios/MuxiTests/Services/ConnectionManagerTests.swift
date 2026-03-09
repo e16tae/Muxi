@@ -352,4 +352,66 @@ final class ConnectionManagerTests: XCTestCase {
         )
         XCTAssertNotEqual(ConnectionState.disconnected, ConnectionState.connecting)
     }
+
+    // MARK: - Reattach
+
+    func testReattachSwitchesToNextSession() async throws {
+        let ssh = MockSSHService()
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:alpha:1:0\n$1:beta:1:0"
+        let manager = ConnectionManager(sshService: ssh)
+        try await manager.connect(server: makeServer(), password: "p")
+        XCTAssertEqual(manager.state, .attached(sessionName: "alpha"))
+
+        // Simulate: alpha was destroyed, only beta remains
+        ssh.mockExecResults["tmux list-sessions"] = "$1:beta:1:0"
+
+        await manager.reattach()
+
+        XCTAssertEqual(manager.state, .attached(sessionName: "beta"))
+        XCTAssertNotNil(manager.activeChannel)
+    }
+
+    func testReattachDisconnectsWhenNoSessionsRemain() async throws {
+        let ssh = MockSSHService()
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:only:1:0"
+        let manager = ConnectionManager(sshService: ssh)
+        try await manager.connect(server: makeServer(), password: "p")
+        XCTAssertEqual(manager.state, .attached(sessionName: "only"))
+
+        // Simulate: no sessions left
+        ssh.mockExecResults["tmux list-sessions"] = ""
+
+        await manager.reattach()
+
+        XCTAssertEqual(manager.state, .disconnected)
+        XCTAssertNil(manager.activeChannel)
+    }
+
+    func testReattachFallsBackToReconnectOnSSHFailure() async throws {
+        let ssh = MockSSHService()
+        ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
+        ssh.mockExecResults["tmux list-sessions"] = "$0:work:1:0"
+        let manager = ConnectionManager(sshService: ssh, maxReconnectAttempts: 1)
+        try await manager.connect(server: makeServer(), password: "p")
+        XCTAssertEqual(manager.state, .attached(sessionName: "work"))
+
+        // Simulate: SSH died — execCommand will throw
+        ssh.simulateDisconnect()
+
+        await manager.reattach()
+
+        // reconnect() also fails (SSH is down, 1 attempt max) → disconnected
+        XCTAssertEqual(manager.state, .disconnected)
+    }
+
+    func testReattachDoesNothingWhenNotAttached() async {
+        let manager = ConnectionManager(sshService: MockSSHService())
+        XCTAssertEqual(manager.state, .disconnected)
+
+        await manager.reattach()
+
+        XCTAssertEqual(manager.state, .disconnected)
+    }
 }

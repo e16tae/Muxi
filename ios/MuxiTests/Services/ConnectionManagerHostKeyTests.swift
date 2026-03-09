@@ -51,7 +51,7 @@ final class HostKeyMockSSHService: SSHServiceProtocol {
     func execCommand(_ command: String) async throws -> String {
         guard state == .connected else { throw SSHError.notConnected }
         for (key, value) in mockExecResults {
-            if command.hasPrefix(key) { return value }
+            if command.contains(key) { return value }
         }
         return ""
     }

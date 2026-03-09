@@ -13,6 +13,10 @@ struct ThemeManagerTests {
 
     @Test("Default theme is set")
     @MainActor func defaultTheme() {
+        // Remove any stale theme selection from previous test runs
+        // so init() falls through to the default path.
+        UserDefaults.standard.removeObject(forKey: "selectedThemeId")
+        defer { UserDefaults.standard.removeObject(forKey: "selectedThemeId") }
         let manager = ThemeManager()
         #expect(
             manager.currentTheme.id == manager.themes.first?.id

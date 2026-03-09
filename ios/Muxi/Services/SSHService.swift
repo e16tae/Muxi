@@ -308,10 +308,14 @@ actor SSHService: SSHServiceProtocol {
         auth: SSHAuth,
         expectedFingerprint: String? = nil
     ) async throws {
-        // Clean up any previous connection first.
-        if state != .disconnected {
-            await performDisconnect()
-        }
+        // Always clean up any previous connection first.
+        // The state check was removed because the readTask may have
+        // already set state to .disconnected (on channel EOF) while
+        // the session/channel handles are still alive.  Skipping
+        // cleanup in that case leaks the old session and causes a
+        // use-after-free crash when the orphaned channel's deinit
+        // tries to send a close packet over a destroyed session.
+        await performDisconnect()
 
         updateState(.connecting)
         sshLog.info("Connecting to \(host):\(port) as \(username)")
@@ -454,6 +458,12 @@ actor SSHService: SSHServiceProtocol {
         readTask?.cancel()
         await readTask?.value  // Wait for read loop to exit
         readTask = nil
+        // Explicitly close the channel BEFORE freeing the session.
+        // The channel's close() sends a SSH_MSG_CHANNEL_CLOSE packet
+        // which requires the session and socket to be alive.  If we
+        // just nil the reference, deinit calls close() — but by then
+        // cleanupSession() may have already freed the session handle.
+        activeShellChannel?.close()
         activeShellChannel = nil
         cleanupSession()
         updateState(.disconnected)

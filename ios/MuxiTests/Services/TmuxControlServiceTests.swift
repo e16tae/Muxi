@@ -168,6 +168,16 @@ final class TmuxControlServiceTests: XCTestCase {
 
     // MARK: - Line Accumulator (feed)
 
+    /// DCS prefix that puts the service into control mode.
+    /// feed() skips all lines until it sees this prefix, matching real
+    /// tmux behavior where shell output precedes control mode.
+    private static let dcsPrefix = Data("\u{1B}P1000p\n".utf8)
+
+    /// Feed the DCS prefix to enter control mode before sending test data.
+    private func enterControlMode(_ service: TmuxControlService) {
+        service.feed(Self.dcsPrefix)
+    }
+
     func testFeedCompleteLine() {
         let service = TmuxControlService()
         var exitCalled = false
@@ -176,6 +186,7 @@ final class TmuxControlServiceTests: XCTestCase {
             exitCalled = true
         }
 
+        enterControlMode(service)
         let data = Data("%exit\n".utf8)
         service.feed(data)
 
@@ -189,6 +200,8 @@ final class TmuxControlServiceTests: XCTestCase {
         service.onWindowAdd = { windowId in
             receivedWindowId = windowId
         }
+
+        enterControlMode(service)
 
         // Feed partial data first
         service.feed(Data("%window".utf8))
@@ -207,6 +220,7 @@ final class TmuxControlServiceTests: XCTestCase {
             windowAddIds.append(windowId)
         }
 
+        enterControlMode(service)
         let data = Data("%window-add @1\n%window-add @2\n".utf8)
         service.feed(data)
 
@@ -222,6 +236,8 @@ final class TmuxControlServiceTests: XCTestCase {
         service.onExit = {
             exitCalled = true
         }
+
+        enterControlMode(service)
 
         // Feed byte-by-byte
         let fullLine = "%exit\n"
@@ -240,12 +256,17 @@ final class TmuxControlServiceTests: XCTestCase {
             receivedWindowId = windowId
         }
 
+        enterControlMode(service)
+
         // Feed partial data
         service.feed(Data("%window-add @".utf8))
         XCTAssertNil(receivedWindowId)
 
-        // Reset clears the buffer
+        // Reset clears the buffer (also resets inControlMode)
         service.resetLineBuffer()
+
+        // Re-enter control mode after reset
+        enterControlMode(service)
 
         // Feed a fresh complete line — old partial data is gone
         service.feed(Data("%window-add @9\n".utf8))
@@ -256,6 +277,8 @@ final class TmuxControlServiceTests: XCTestCase {
         let service = TmuxControlService()
         var exitCalled = false
         service.onExit = { exitCalled = true }
+
+        enterControlMode(service)
 
         // PTY-style CRLF: \r should be stripped, leaving "%exit" which parses correctly
         let data = "%exit\r\n".data(using: .utf8)!

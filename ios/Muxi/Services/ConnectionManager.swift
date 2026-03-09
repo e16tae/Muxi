@@ -642,6 +642,17 @@ final class ConnectionManager {
         state = .reconnecting
         reconnectAttempt = 0
 
+        // Clean up stale references from the previous connection.
+        // activeChannel must be nil so refreshSessions() can run
+        // execCommand() (it guards on activeChannel == nil).
+        // Without this, reconnect would skip the session query and
+        // try to re-attach to a session that may no longer exist,
+        // causing an infinite %exit → reconnect loop.
+        sshMonitorTask?.cancel()
+        sshMonitorTask = nil
+        activeChannel = nil
+        tmuxService.resetLineBuffer()
+
         for attempt in 1...maxReconnectAttempts {
             reconnectAttempt = attempt
             do {

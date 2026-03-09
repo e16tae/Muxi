@@ -118,9 +118,11 @@ class MockSSHService: SSHServiceProtocol {
     func execCommand(_ command: String) async throws -> String {
         guard state == .connected else { throw SSHError.notConnected }
         if let error = mockExecError { throw error }
-        // Check for per-command override by prefix match.
+        // Check for per-command override by substring match.
+        // Uses contains() so keys like "tmux list-sessions" match
+        // commands wrapped with "timeout 5 tmux list-sessions ...".
         for (key, value) in mockExecResults {
-            if command.hasPrefix(key) { return value }
+            if command.contains(key) { return value }
         }
         return mockExecResult
     }

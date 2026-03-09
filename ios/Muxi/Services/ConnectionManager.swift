@@ -122,6 +122,8 @@ final class ConnectionManager {
     enum PendingCommand {
         /// `capture-pane -e -p -t %<id>` — feed response into pane buffer.
         case capturePane(paneId: String)
+        /// `display-message -p -t %<id> '#{cursor_x}:#{cursor_y}'` — sync cursor after capture-pane.
+        case cursorQuery(paneId: String)
         /// `capture-pane -e -p -S -<N> -t %<id>` — deliver to scrollback continuation.
         case scrollbackCapture
         /// Any command whose response we don't need (send-keys, refresh-client, etc.).
@@ -887,9 +889,16 @@ final class ConnectionManager {
             if !self.pendingInitialResize {
                 for paneId in newPaneIds {
                     Task {
+                        // Send capture-pane and cursor query together so
+                        // both land in pendingCommands before any response
+                        // arrives — eliminates the gap where %output could
+                        // be rendered at the wrong cursor position.
                         try? await self.sendControlCommand(
                             "capture-pane -e -p -t \(paneId.shellEscaped())\n",
                             type: .capturePane(paneId: paneId))
+                        try? await self.sendControlCommand(
+                            "display-message -p -t \(paneId.shellEscaped()) '#{cursor_x}:#{cursor_y}'\n",
+                            type: .cursorQuery(paneId: paneId))
                     }
                 }
             }
@@ -913,9 +922,30 @@ final class ConnectionManager {
                     // capture-pane -e -p uses bare \n between lines, but the
                     // VT parser's \n only increments cursor_row (no CR).
                     // Normalize to \r\n so each line starts at column 0.
-                    let normalized = response.replacingOccurrences(of: "\n", with: "\r\n")
+                    //
+                    // Strip trailing empty lines — capture-pane includes every
+                    // row of the visible area, so blank rows below the prompt
+                    // push the VT cursor to the bottom of the grid.  The
+                    // paired cursorQuery (sent right after this capture-pane)
+                    // sets the exact position, but trimming keeps the cursor
+                    // close to correct even before the query response arrives.
+                    var trimmed = response
+                    while trimmed.hasSuffix("\n") {
+                        trimmed = String(trimmed.dropLast())
+                    }
+                    let normalized = trimmed.replacingOccurrences(of: "\n", with: "\r\n")
                     fresh.feed(normalized)
                     self.paneBuffers[paneId] = fresh
+                }
+            case .cursorQuery(let paneId):
+                // Response format: "col:row" (0-based).
+                let parts = response.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .split(separator: ":")
+                if parts.count == 2,
+                   let col = Int(parts[0]),
+                   let row = Int(parts[1]) {
+                    self.paneBuffers[paneId]?.setCursor(row: row, col: col)
+                    self.paneBuffers[paneId]?.onUpdate?()
                 }
             case .scrollbackCapture:
                 self.deliverScrollbackResponse(response)

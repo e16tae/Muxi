@@ -559,6 +559,16 @@ void vt_parser_resize(VTParserState *parser, int32_t cols, int32_t rows) {
     parser->scroll_bottom = rows - 1;
 }
 
+void vt_parser_set_cursor(VTParserState *parser, int32_t row, int32_t col) {
+    if (!parser) return;
+    if (row < 0) row = 0;
+    if (col < 0) col = 0;
+    if (row >= parser->rows) row = parser->rows - 1;
+    if (col >= parser->cols) col = parser->cols - 1;
+    parser->cursor_row = row;
+    parser->cursor_col = col;
+}
+
 int32_t vt_parser_get_line(const VTParserState *parser, int32_t row, char *buf, int32_t buf_size) {
     if (!parser || !buf || buf_size <= 0 || row < 0 || row >= parser->rows) {
         if (buf && buf_size > 0) buf[0] = '\0';

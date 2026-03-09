@@ -106,6 +106,13 @@ final class TerminalBuffer {
         onUpdate?()
     }
 
+    // MARK: Cursor
+
+    /// Set the cursor position (clamped to grid bounds by the C layer).
+    func setCursor(row: Int, col: Int) {
+        vt_parser_set_cursor(&parser, Int32(row), Int32(col))
+    }
+
     // MARK: Resize
 
     /// Resize the terminal grid. Existing content is preserved where possible.

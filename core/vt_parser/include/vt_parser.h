@@ -82,4 +82,7 @@ int32_t vt_parser_get_line(const VTParserState *parser, int32_t row, char *buf, 
 // Get a specific cell
 void vt_parser_get_cell(const VTParserState *parser, int32_t row, int32_t col, VTCell *out);
 
+// Set the cursor position (clamped to grid bounds)
+void vt_parser_set_cursor(VTParserState *parser, int32_t row, int32_t col);
+
 #endif

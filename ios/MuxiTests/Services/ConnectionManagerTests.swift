@@ -83,8 +83,8 @@ final class ConnectionManagerTests: XCTestCase {
         let ssh = MockSSHService()
         ssh.mockExecResults["tmux -V"] = "tmux 3.4\n"
         ssh.mockExecResults["tmux list-sessions"] = ""
-        // After creating "main", the next list-sessions returns it
-        ssh.mockExecResults["tmux new-session"] = ""
+        // new-session -d -P -F '#{session_name}' returns the assigned name
+        ssh.mockExecResults["tmux new-session"] = "0\n"
         let manager = ConnectionManager(sshService: ssh)
 
         try await manager.connect(
@@ -92,8 +92,8 @@ final class ConnectionManagerTests: XCTestCase {
             password: "p"
         )
 
-        // Auto-creates and attaches to "main"
-        XCTAssertEqual(manager.state, .attached(sessionName: "main"))
+        // Auto-creates with tmux default name and attaches
+        XCTAssertEqual(manager.state, .attached(sessionName: "0"))
     }
 
     // MARK: - Disconnect

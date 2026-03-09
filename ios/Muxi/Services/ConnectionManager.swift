@@ -133,6 +133,8 @@ final class ConnectionManager {
         case scrollbackCapture
         /// `list-sessions -F '...'` — refresh the session list.
         case listSessions
+        /// `new-session -d -P -F '#{session_name}'` — parse created session name and switch to it.
+        case createSession
         /// Any command whose response we don't need (send-keys, refresh-client, etc.).
         case ignored
     }
@@ -267,9 +269,11 @@ final class ConnectionManager {
             } else {
                 // No sessions or tmux server was stuck — kill stale server and create fresh.
                 logger.info("No sessions found, creating new session...")
-                _ = try await sshService.execCommand("tmux kill-server 2>/dev/null; tmux new-session -d -s \("main".shellEscaped())")
-                targetSession = "main"
-                logger.info("Created new session: main")
+                let newSessionOutput = try await sshService.execCommand(
+                    "tmux kill-server 2>/dev/null; tmux new-session -d -P -F '#{session_name}'"
+                )
+                targetSession = newSessionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                logger.info("Created new session: \(targetSession)")
                 // Refresh to populate sessions array
                 let refreshed = try await sshService.execCommand(
                     "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}' 2>/dev/null || true"
@@ -602,23 +606,28 @@ final class ConnectionManager {
     /// When a shell is active (non-blocking mode), `execCommand` cannot open
     /// new channels. Instead, the create command is sent through the tmux
     /// control mode channel, and the session list is updated locally.
-    func createAndSwitchToNewSession(name: String) async throws {
+    func createAndSwitchToNewSession(name: String? = nil) async throws {
         guard case .attached = state else { return }
 
-        // Create session via tmux control mode channel.
-        logger.info("Creating new session '\(name)' via control channel")
-        try await sendControlCommand(
-            "new-session -d -s \(name.shellEscaped())\n", type: .ignored)
-
-        // Add to local session list (execCommand-based refresh doesn't work
-        // while a shell is active).
-        if !sessions.contains(where: { $0.name == name }) {
-            sessions.append(TmuxSession(
-                id: "", name: name, windows: [], createdAt: Date(), lastActivity: Date()
-            ))
+        if let name {
+            // Custom name: create and switch immediately (name is known).
+            logger.info("Creating new session '\(name)' via control channel")
+            try await sendControlCommand(
+                "new-session -d -s \(name.shellEscaped())\n", type: .ignored)
+            if !sessions.contains(where: { $0.name == name }) {
+                sessions.append(TmuxSession(
+                    id: "", name: name, windows: [], createdAt: Date(), lastActivity: Date()
+                ))
+            }
+            try await switchSession(to: name)
+        } else {
+            // No name: let tmux assign the next number.
+            // The response (via .createSession) contains the assigned name
+            // and triggers switchSession automatically.
+            logger.info("Creating new session with tmux default name")
+            try await sendControlCommand(
+                "new-session -d -P -F '#{session_name}'\n", type: .createSession)
         }
-
-        try await switchSession(to: name)
     }
 
     // MARK: - Terminal Resize
@@ -973,6 +982,20 @@ final class ConnectionManager {
                 } else {
                     self.sessions = parsed
                 }
+            case .createSession:
+                let name = response.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !name.isEmpty else {
+                    self.logger.warning("new-session returned empty name")
+                    break
+                }
+                self.logger.info("Created session via control mode: \(name)")
+                if !self.sessions.contains(where: { $0.name == name }) {
+                    self.sessions.append(TmuxSession(
+                        id: "", name: name, windows: [],
+                        createdAt: Date(), lastActivity: Date()
+                    ))
+                }
+                Task { try? await self.switchSession(to: name) }
             case .ignored:
                 break
             }

@@ -199,17 +199,17 @@ struct TerminalSessionView: View {
             }
         }
         .alert("New Session", isPresented: $showNewSessionAlert) {
-            TextField("Session name", text: $newSessionName)
+            TextField("Optional name", text: $newSessionName)
             Button("Create") {
-                let name = newSessionName.trimmingCharacters(in: .whitespaces)
+                let trimmed = newSessionName.trimmingCharacters(in: .whitespaces)
+                let name: String? = trimmed.isEmpty ? nil : trimmed
                 newSessionName = ""
-                guard !name.isEmpty else { return }
                 Task {
                     do {
                         try await connectionManager.createAndSwitchToNewSession(name: name)
-                        logger.info("Created and switched to session: \(name)")
+                        logger.info("Created and switched to session: \(name ?? "(auto)")")
                     } catch {
-                        logger.error("Failed to create session '\(name)': \(error.localizedDescription)")
+                        logger.error("Failed to create session: \(error.localizedDescription)")
                     }
                 }
             }

@@ -13,13 +13,13 @@ struct TerminalSessionView: View {
     let themeManager: ThemeManager
 
     private let logger = Logger(subsystem: "com.muxi.app", category: "TerminalSession")
-    @State private var activePaneId: String?
     @State private var inputHandler = InputHandler()
     @State private var isKeyboardActive = false
     @State private var scrollbackState: [String: ScrollbackState] = [:]
     @State private var scrollbackCaches: [String: TerminalBuffer] = [:]
     @State private var showNewSessionAlert = false
     @State private var newSessionName = ""
+    @State private var keyboardHeight: CGFloat = 0
 
     /// Build pane info from ConnectionManager's live pane data.
     private var panes: [PaneContainerView.PaneInfo] {
@@ -117,15 +117,18 @@ struct TerminalSessionView: View {
                         panes: panes,
                         theme: themeManager.currentTheme,
                         fontSize: themeManager.fontSize,
-                        activePaneId: $activePaneId,
+                        activePaneId: Binding(
+                            get: { connectionManager.activePaneId },
+                            set: { connectionManager.activePaneId = $0 }
+                        ),
                         onPaneTapped: { _ in
                             isKeyboardActive = true
                         },
                         onPaste: { text in
                             pasteToActivePane(text)
                         },
-                        scrollbackBuffer: activePaneId.flatMap { scrollbackCaches[$0] },
-                        scrollbackOffset: activePaneId.flatMap {
+                        scrollbackBuffer: connectionManager.activePaneId.flatMap { scrollbackCaches[$0] },
+                        scrollbackOffset: connectionManager.activePaneId.flatMap {
                             if case .scrolling(let offset, _) = scrollbackState[$0] {
                                 return offset
                             }
@@ -134,7 +137,7 @@ struct TerminalSessionView: View {
                         onScrollOffsetChanged: { paneId, delta in
                             handleScrollDelta(paneId: paneId, delta: delta)
                         },
-                        showNewOutputIndicator: activePaneId.map { connectionManager.paneHasNewOutput.contains($0) } ?? false,
+                        showNewOutputIndicator: connectionManager.activePaneId.map { connectionManager.paneHasNewOutput.contains($0) } ?? false,
                         onReturnToLive: { paneId in
                             returnToLive(paneId: paneId)
                         }
@@ -178,7 +181,6 @@ struct TerminalSessionView: View {
             .frame(width: 1, height: 1)
             .opacity(0)
         }
-        .background(themeManager.currentTheme.background.color)
         .overlay(alignment: .bottomTrailing) {
             QuickActionButton(onAction: { command in
                 sendTmuxCommand(command)
@@ -186,14 +188,13 @@ struct TerminalSessionView: View {
             .padding(.trailing, MuxiTokens.Spacing.lg)
             .padding(.bottom, MuxiTokens.Spacing.lg)
         }
-        .onChange(of: panes) { _, newPanes in
-            let paneIds = Set(newPanes.map(\.id))
-            if let active = activePaneId, !paneIds.contains(active) {
-                // Active pane was removed — select the last available pane
-                activePaneId = newPanes.last?.id
-            }
-            if activePaneId == nil, let first = newPanes.first {
-                activePaneId = first.id
+        .padding(.bottom, keyboardHeight)
+        .background(themeManager.currentTheme.background.color)
+        .ignoresSafeArea(.keyboard)
+        .onChange(of: connectionManager.activePaneId) { _, newValue in
+            // Reactivate keyboard when a new pane becomes active
+            // (e.g. after session switch or pane creation).
+            if newValue != nil {
                 isKeyboardActive = true
             }
         }
@@ -213,6 +214,22 @@ struct TerminalSessionView: View {
                 }
             }
             Button("Cancel", role: .cancel) { newSessionName = "" }
+        }
+        .task {
+            for await notification in NotificationCenter.default.notifications(named: UIResponder.keyboardWillChangeFrameNotification) {
+                guard let userInfo = notification.userInfo,
+                      let endFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { continue }
+                let screenHeight = UIScreen.main.bounds.height
+                let rawHeight = max(screenHeight - endFrame.origin.y, 0)
+                let safeAreaBottom = UIApplication.shared.connectedScenes
+                    .compactMap { ($0 as? UIWindowScene)?.keyWindow }
+                    .first?.safeAreaInsets.bottom ?? 0
+                let newHeight = max(rawHeight - safeAreaBottom, 0)
+                let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+                withAnimation(.easeInOut(duration: duration)) {
+                    keyboardHeight = newHeight
+                }
+            }
         }
     }
 
@@ -268,13 +285,10 @@ struct TerminalSessionView: View {
 
     /// Send raw data to the active pane via tmux control mode.
     private func sendToActivePane(_ data: Data) {
-        guard let paneId = activePaneId else { return }
-
-        let hexKeys = data.map { String(format: "0x%02x", $0) }.joined(separator: " ")
-        let command = "send-keys -t \(paneId.shellEscaped()) \(hexKeys)\n"
+        guard let paneId = connectionManager.activePaneId else { return }
         Task {
             do {
-                try await connectionManager.sshServiceForWrites.writeToChannel(Data(command.utf8))
+                try await connectionManager.sendKeysToPane(paneId, data: data)
             } catch {
                 logger.error("Failed to send keys to pane \(paneId): \(error.localizedDescription)")
             }
@@ -283,10 +297,9 @@ struct TerminalSessionView: View {
 
     /// Send a tmux command through the control mode channel.
     private func sendTmuxCommand(_ command: String) {
-        let fullCommand = command + "\n"
         Task {
             do {
-                try await connectionManager.sshServiceForWrites.writeToChannel(Data(fullCommand.utf8))
+                try await connectionManager.sendTmuxCommand(command)
             } catch {
                 logger.error("Failed to send tmux command: \(error.localizedDescription)")
             }
@@ -298,12 +311,10 @@ struct TerminalSessionView: View {
     /// paste buffer. tmux automatically wraps with bracketed paste sequences
     /// if the pane's application has enabled bracketed paste mode.
     private func pasteToActivePane(_ text: String) {
-        guard let paneId = activePaneId, !text.isEmpty else { return }
-        let escaped = text.tmuxQuoted()
-        let command = "set-buffer -b ios_paste -- \(escaped)\npaste-buffer -b ios_paste -t \(paneId.shellEscaped()) -d\n"
+        guard let paneId = connectionManager.activePaneId, !text.isEmpty else { return }
         Task {
             do {
-                try await connectionManager.sshServiceForWrites.writeToChannel(Data(command.utf8))
+                try await connectionManager.pasteToPane(paneId, text: text)
             } catch {
                 logger.error("Failed to paste to pane \(paneId): \(error.localizedDescription)")
             }
@@ -366,7 +377,9 @@ struct TerminalSessionView: View {
                 let cols = liveBuffer?.cols ?? 80
                 let totalLines = lines.count
                 let cacheBuffer = TerminalBuffer(cols: cols, rows: totalLines)
-                cacheBuffer.feed(response)
+                // capture-pane uses bare \n; normalize to \r\n for VT parser.
+                let normalized = response.replacingOccurrences(of: "\n", with: "\r\n")
+                cacheBuffer.feed(normalized)
 
                 scrollbackCaches[paneId] = cacheBuffer
                 scrollbackState[paneId] = .scrolling(
@@ -404,7 +417,8 @@ struct TerminalSessionView: View {
                 guard totalLines > currentTotal else { return }
 
                 let cacheBuffer = TerminalBuffer(cols: cols, rows: totalLines)
-                cacheBuffer.feed(response)
+                let normalized = response.replacingOccurrences(of: "\n", with: "\r\n")
+                cacheBuffer.feed(normalized)
 
                 // Preserve user's scroll position relative to the bottom.
                 let previousOffset: Int

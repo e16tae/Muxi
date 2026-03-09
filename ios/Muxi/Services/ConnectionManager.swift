@@ -66,8 +66,42 @@ final class ConnectionManager {
     /// Current pane layout from tmux.
     private(set) var currentPanes: [TmuxControlService.ParsedPane] = []
 
+    /// The currently active (focused) pane ID, e.g. "%0".
+    /// Managed directly by ConnectionManager to avoid SwiftUI onChange timing issues.
+    var activePaneId: String?
+
     /// The SSH service (exposed for actor-routed channel writes).
-    var sshServiceForWrites: SSHServiceProtocol { sshService }
+    private var sshServiceForWrites: SSHServiceProtocol { sshService }
+
+    // MARK: - Tmux Command Sending
+
+    /// Send a tmux command through the control-mode channel and register
+    /// its expected `%begin/%end` response type in the pending queue.
+    private func sendControlCommand(_ command: String, type: PendingCommand) async throws {
+        pendingCommands.append(type)
+        try await sshServiceForWrites.writeToChannel(Data(command.utf8))
+    }
+
+    /// Send raw key data to a pane via `send-keys`.
+    func sendKeysToPane(_ paneId: String, data: Data) async throws {
+        let hexKeys = data.map { String(format: "0x%02x", $0) }.joined(separator: " ")
+        let command = "send-keys -t \(paneId.shellEscaped()) \(hexKeys)\n"
+        try await sendControlCommand(command, type: .ignored)
+    }
+
+    /// Paste text to a pane via `set-buffer` + `paste-buffer`.
+    func pasteToPane(_ paneId: String, text: String) async throws {
+        let escaped = text.tmuxQuoted()
+        try await sendControlCommand(
+            "set-buffer -b ios_paste -- \(escaped)\n", type: .ignored)
+        try await sendControlCommand(
+            "paste-buffer -b ios_paste -t \(paneId.shellEscaped()) -d\n", type: .ignored)
+    }
+
+    /// Send an arbitrary tmux command (quick actions, etc.).
+    func sendTmuxCommand(_ command: String) async throws {
+        try await sendControlCommand(command + "\n", type: .ignored)
+    }
 
     /// The active SSH shell channel (for tmux control mode).
     private(set) var activeChannel: SSHChannel?
@@ -81,10 +115,19 @@ final class ConnectionManager {
     /// again when re-establishing a dropped connection.
     private var cachedAuth: SSHAuth?
 
-    /// Queue of pane IDs waiting for ``capture-pane`` response.
-    /// Each ``capture-pane -e -p -t %<id>`` triggers a %begin/%end block;
-    /// responses are matched to panes in FIFO order.
-    private var capturePaneQueue: [String] = []
+    /// Tracks the type of each pending tmux command whose `%begin/%end`
+    /// response has not yet arrived.  Every command sent through the
+    /// control-mode channel generates a `%begin/%end` block; this queue
+    /// tells ``onCommandResponse`` how to route each response.
+    enum PendingCommand {
+        /// `capture-pane -e -p -t %<id>` — feed response into pane buffer.
+        case capturePane(paneId: String)
+        /// `capture-pane -e -p -S -<N> -t %<id>` — deliver to scrollback continuation.
+        case scrollbackCapture
+        /// Any command whose response we don't need (send-keys, refresh-client, etc.).
+        case ignored
+    }
+    private var pendingCommands: [PendingCommand] = []
 
     /// When `true`, layout-change callbacks skip ``capture-pane`` for new
     /// panes. Set at attach time and cleared by the first real resize from
@@ -340,7 +383,7 @@ final class ConnectionManager {
         currentServer = nil
         sessions = []
         cachedAuth = nil
-        capturePaneQueue = []
+        pendingCommands = []
         lastSentSize = (0, 0)
         pendingInitialResize = false
 
@@ -376,7 +419,7 @@ final class ConnectionManager {
             currentPanes = []
             state = .disconnected
             sessions = []
-            capturePaneQueue = []
+            pendingCommands = []
             lastSentSize = (0, 0)
 
             // Clear credentials from memory while backgrounded.
@@ -400,7 +443,7 @@ final class ConnectionManager {
             sshService.disconnect()
             state = .disconnected
             sessions = []
-            capturePaneQueue = []
+            pendingCommands = []
             lastSentSize = (0, 0)
         }
         // If already disconnected, do nothing.
@@ -472,8 +515,7 @@ final class ConnectionManager {
         state = .attached(sessionName: sessionName)
 
         pendingInitialResize = true
-        let refreshCmd = "refresh-client -C 80,24\n"
-        try await sshService.writeToChannel(Data(refreshCmd.utf8))
+        try await sendControlCommand("refresh-client -C 80,24\n", type: .ignored)
 
         sshMonitorTask?.cancel()
         sshMonitorTask = Task { [weak self] in
@@ -513,6 +555,7 @@ final class ConnectionManager {
     /// Closes the current control mode channel and reattaches to the new session.
     func switchSession(to sessionName: String) async throws {
         guard case .attached(let currentSession) = state else { return }
+        guard currentSession != sessionName else { return }
         logger.info("Switching session: '\(currentSession)' → '\(sessionName)'")
 
         // Cancel any pending scrollback fetch to avoid leaking the continuation.
@@ -521,27 +564,19 @@ final class ConnectionManager {
             continuation.resume(throwing: ScrollbackError.notAttached)
         }
 
-        // Clean up current session
-        sshMonitorTask?.cancel()
-        sshMonitorTask = nil
-        activeChannel = nil
-        tmuxService.resetLineBuffer()
-        paneBuffers = [:]
-        currentPanes = []
+        // Clear scrollback and active pane — onLayoutChange will set the new active pane.
         scrolledBackPanes = []
         paneHasNewOutput = []
-        capturePaneQueue = []
-        lastSentSize = (0, 0)
+        activePaneId = nil
 
-        // Close the shell channel
-        await sshService.closeShell()
-
-        // Attach to new session
-        try await performAttach(sessionName: sessionName)
-
-        // Save as last-used
-        if let serverID = currentServer?.id.uuidString {
-            lastSessionStore.save(sessionName: sessionName, forServerID: serverID)
+        // Send switch-client followed by refresh-client to ensure the new
+        // session's window is resized to match our terminal dimensions.
+        try await sendControlCommand(
+            "switch-client -t \(sessionName.shellEscaped())\n", type: .ignored)
+        let (cols, rows) = lastSentSize
+        if cols > 0, rows > 0 {
+            try await sendControlCommand(
+                "refresh-client -C \(cols),\(rows)\n", type: .ignored)
         }
     }
 
@@ -554,9 +589,9 @@ final class ConnectionManager {
         guard case .attached = state else { return }
 
         // Create session via tmux control mode channel.
-        let cmd = "new-session -d -s \(name.shellEscaped())\n"
         logger.info("Creating new session '\(name)' via control channel")
-        try await sshService.writeToChannel(Data(cmd.utf8))
+        try await sendControlCommand(
+            "new-session -d -s \(name.shellEscaped())\n", type: .ignored)
 
         // Add to local session list (execCommand-based refresh doesn't work
         // while a shell is active).
@@ -583,9 +618,9 @@ final class ConnectionManager {
         lastSentSize = (cols, rows)
         pendingInitialResize = false
         logger.info("Resizing terminal to \(cols)x\(rows)")
-        let cmd = "refresh-client -C \(cols),\(rows)\n"
         Task {
-            try? await sshService.writeToChannel(Data(cmd.utf8))
+            try? await self.sendControlCommand(
+                "refresh-client -C \(cols),\(rows)\n", type: .ignored)
         }
     }
 
@@ -596,8 +631,8 @@ final class ConnectionManager {
     /// while a shell is active due to non-blocking mode).
     func createTmuxSession(name: String) async throws {
         guard case .attached = state else { return }
-        let cmd = "new-session -d -s \(name.shellEscaped())\n"
-        try await sshService.writeToChannel(Data(cmd.utf8))
+        try await sendControlCommand(
+            "new-session -d -s \(name.shellEscaped())\n", type: .ignored)
         if !sessions.contains(where: { $0.name == name }) {
             sessions.append(TmuxSession(
                 id: "", name: name, windows: [], createdAt: Date(), lastActivity: Date()
@@ -609,8 +644,8 @@ final class ConnectionManager {
     /// Uses the tmux control mode channel.
     func deleteTmuxSession(_ session: TmuxSession) async throws {
         guard case .attached = state else { return }
-        let cmd = "kill-session -t \(session.name.shellEscaped())\n"
-        try await sshService.writeToChannel(Data(cmd.utf8))
+        try await sendControlCommand(
+            "kill-session -t \(session.name.shellEscaped())\n", type: .ignored)
         sessions.removeAll { $0.name == session.name }
     }
 
@@ -730,11 +765,12 @@ final class ConnectionManager {
 
         return try await withCheckedThrowingContinuation { continuation in
             scrollbackContinuation = continuation
-            let cmd = "capture-pane -e -p -S -\(lineCount) -t \(paneId.shellEscaped())\n"
             Task {
                 do {
-                    try await sshServiceForWrites.writeToChannel(Data(cmd.utf8))
-                    logger.info("Sent scrollback capture-pane for \(paneId)")
+                    try await self.sendControlCommand(
+                        "capture-pane -e -p -S -\(lineCount) -t \(paneId.shellEscaped())\n",
+                        type: .scrollbackCapture)
+                    self.logger.info("Sent scrollback capture-pane for \(paneId)")
                 } catch {
                     if let cont = self.scrollbackContinuation {
                         self.scrollbackContinuation = nil
@@ -830,9 +866,15 @@ final class ConnectionManager {
                 }
             }
             // Remove buffers for panes that no longer exist.
-            let activePaneIds = Set(panes.map { "%\($0.paneId)" })
-            for key in self.paneBuffers.keys where !activePaneIds.contains(key) {
+            let currentPaneIds = Set(panes.map { "%\($0.paneId)" })
+            for key in self.paneBuffers.keys where !currentPaneIds.contains(key) {
                 self.paneBuffers.removeValue(forKey: key)
+            }
+            // Update activePaneId: if the current active pane is gone, pick the first new one.
+            if let active = self.activePaneId, !currentPaneIds.contains(active) {
+                self.activePaneId = panes.first.map { "%\($0.paneId)" }
+            } else if self.activePaneId == nil, let first = panes.first {
+                self.activePaneId = "%\(first.paneId)"
             }
             // Request initial screen content for newly created panes —
             // but NOT during the initial attach sequence.  The first
@@ -844,36 +886,54 @@ final class ConnectionManager {
             // resizeTerminal() call from the GeometryReader.
             if !self.pendingInitialResize {
                 for paneId in newPaneIds {
-                    self.capturePaneQueue.append(paneId)
-                    let cmd = "capture-pane -e -p -t \(paneId.shellEscaped())\n"
                     Task {
-                        try? await self.sshServiceForWrites.writeToChannel(Data(cmd.utf8))
-                        self.logger.info("Sent capture-pane for \(paneId)")
+                        try? await self.sendControlCommand(
+                            "capture-pane -e -p -t \(paneId.shellEscaped())\n",
+                            type: .capturePane(paneId: paneId))
                     }
                 }
-            } else {
-                self.logger.info("Skipping capture-pane for \(newPaneIds) — pending initial resize")
             }
         }
 
         tmuxService.onCommandResponse = { [weak self] response in
             guard let self else { return }
+            guard let pending = self.pendingCommands.first else {
+                self.logger.info("Unexpected command response (\(response.count) chars)")
+                return
+            }
+            self.pendingCommands.removeFirst()
 
-            // If a scrollback fetch is pending, deliver the response to it.
-            if self.scrollbackContinuation != nil {
+            switch pending {
+            case .capturePane(let paneId):
+                if !response.isEmpty, let oldBuffer = self.paneBuffers[paneId] {
+                    // Replace with a fresh buffer to avoid mixing with
+                    // %output data that arrived between buffer creation
+                    // and this capture-pane response.
+                    let fresh = TerminalBuffer(cols: oldBuffer.cols, rows: oldBuffer.rows)
+                    // capture-pane -e -p uses bare \n between lines, but the
+                    // VT parser's \n only increments cursor_row (no CR).
+                    // Normalize to \r\n so each line starts at column 0.
+                    let normalized = response.replacingOccurrences(of: "\n", with: "\r\n")
+                    fresh.feed(normalized)
+                    self.paneBuffers[paneId] = fresh
+                }
+            case .scrollbackCapture:
                 self.deliverScrollbackResponse(response)
-                return
+            case .ignored:
+                break
             }
+        }
 
-            guard let paneId = self.capturePaneQueue.first else {
-                self.logger.info("Command response with no pending capture-pane")
-                return
+        tmuxService.onSessionChanged = { [weak self] sessionId, name in
+            guard let self else { return }
+            self.logger.info("Session changed to '\(name)' (\(sessionId))")
+            self.state = .attached(sessionName: name)
+            // Save as last-used session.
+            if let serverID = self.currentServer?.id.uuidString {
+                self.lastSessionStore.save(sessionName: name, forServerID: serverID)
             }
-            self.capturePaneQueue.removeFirst()
-            self.logger.info("capture-pane response for \(paneId): \(response.count) chars")
-            if !response.isEmpty {
-                self.paneBuffers[paneId]?.feed(response)
-            }
+            // refresh-client is sent in switchSession() right after switch-client,
+            // so no need to send it again here.
         }
 
         tmuxService.onExit = { [weak self] in

@@ -299,4 +299,72 @@ final class TmuxControlServiceTests: XCTestCase {
 
         XCTAssertTrue(exitCalled, "\\r should be stripped so %exit parses correctly")
     }
+
+    // MARK: - Notification Inside Response Block
+
+    func testNotificationInsideResponseBlock() {
+        let service = TmuxControlService()
+        var sessionChangedId: String?
+        var sessionChangedName: String?
+        var commandResponse: String?
+
+        service.onSessionChanged = { id, name in
+            sessionChangedId = id
+            sessionChangedName = name
+        }
+        service.onCommandResponse = { response in
+            commandResponse = response
+        }
+
+        enterControlMode(service)
+
+        // Simulate: list-sessions command response with interleaved notification
+        // tmux interleaves %session-changed inside %begin...%end blocks
+        service.feed(Data("%begin 1234567890 1 0\n".utf8))
+        service.feed(Data("$0:main:2:1740700800\n".utf8))
+        service.feed(Data("%session-changed $1 beta\n".utf8))
+        service.feed(Data("$1:beta:1:1740704400\n".utf8))
+        service.feed(Data("%end 1234567890 1 0\n".utf8))
+
+        // Notification must be dispatched, not swallowed
+        XCTAssertEqual(sessionChangedId, "$1")
+        XCTAssertEqual(sessionChangedName, "beta")
+
+        // Response should contain only data lines, not the notification
+        XCTAssertNotNil(commandResponse)
+        XCTAssertEqual(commandResponse, "$0:main:2:1740700800\n$1:beta:1:1740704400")
+    }
+
+    func testErrorResponseConsumesCommandResponse() {
+        let service = TmuxControlService()
+        var responses: [String] = []
+        var errorMessages: [String] = []
+
+        service.onCommandResponse = { response in
+            responses.append(response)
+        }
+        service.onError = { message in
+            errorMessages.append(message)
+        }
+
+        enterControlMode(service)
+
+        // First command gets a %error response
+        service.feed(Data("%begin 1234567890 1 0\n".utf8))
+        service.feed(Data("%error bad command\n".utf8))
+
+        // %error must still trigger onCommandResponse so the pending
+        // command entry is consumed (otherwise the FIFO queue drifts).
+        XCTAssertEqual(responses.count, 1, "%error must trigger onCommandResponse")
+        XCTAssertEqual(responses[0], "", "Response should be empty (data was before %error)")
+        XCTAssertEqual(errorMessages.count, 1)
+
+        // Second command succeeds normally
+        service.feed(Data("%begin 1234567890 2 0\n".utf8))
+        service.feed(Data("OK\n".utf8))
+        service.feed(Data("%end 1234567890 2 0\n".utf8))
+
+        XCTAssertEqual(responses.count, 2, "Second response must also arrive")
+        XCTAssertEqual(responses[1], "OK")
+    }
 }

@@ -137,9 +137,18 @@ final class TmuxControlService {
                 onCommandResponse?(response)
                 return
             } else if line.hasPrefix("%error") {
+                // %error ends the response block just like %end, but signals
+                // failure.  We must still call onCommandResponse so the
+                // pending command entry is consumed — otherwise the FIFO
+                // queue drifts and subsequent responses are mismatched.
+                let response = responseLines.joined(separator: "\n")
                 responseLines = []
                 inResponseBlock = false
+                onCommandResponse?(response)
                 // Fall through to parse the %error normally
+            } else if line.hasPrefix("%") {
+                // Tmux notification interleaved within a %begin/%end block.
+                // Fall through to parse as notification below.
             } else {
                 // Data line inside %begin...%end block
                 responseLines.append(line)

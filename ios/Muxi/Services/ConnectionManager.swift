@@ -704,6 +704,7 @@ final class ConnectionManager {
         sshMonitorTask = nil
         activeChannel = nil
         tmuxService.resetLineBuffer()
+        pendingCommands = []
 
         for attempt in 1...maxReconnectAttempts {
             reconnectAttempt = attempt
@@ -965,8 +966,13 @@ final class ConnectionManager {
             case .scrollbackCapture:
                 self.deliverScrollbackResponse(response)
             case .listSessions:
-                self.sessions = TmuxControlService.parseFormattedSessionList(response)
-                self.logger.info("Sessions refreshed: \(self.sessions.count) sessions")
+                let parsed = TmuxControlService.parseFormattedSessionList(response)
+                self.logger.info("Sessions refreshed: \(parsed.count) sessions (raw: \(response.prefix(200)))")
+                if parsed.isEmpty && !self.sessions.isEmpty {
+                    self.logger.warning("list-sessions returned empty but we had \(self.sessions.count) sessions — keeping existing list")
+                } else {
+                    self.sessions = parsed
+                }
             case .ignored:
                 break
             }
@@ -976,12 +982,28 @@ final class ConnectionManager {
             guard let self else { return }
             self.logger.info("Session changed to '\(name)' (\(sessionId))")
             self.state = .attached(sessionName: name)
+            // Clear all pane state from the previous session so
+            // onLayoutChange creates fresh buffers.  Without this,
+            // matching pane IDs (e.g. %0) reuse the old buffer and
+            // briefly show stale content like "logout".
+            self.paneBuffers = [:]
+            self.currentPanes = []
+            self.activePaneId = nil
+            self.scrolledBackPanes = []
+            self.paneHasNewOutput = []
             // Save as last-used session.
             if let serverID = self.currentServer?.id.uuidString {
                 self.lastSessionStore.save(sessionName: name, forServerID: serverID)
             }
-            // refresh-client is sent in switchSession() right after switch-client,
-            // so no need to send it again here.
+            // Force tmux to send %layout-change for the new session's
+            // window.  Without this, the cleared paneBuffers/currentPanes
+            // leave the UI with no panes to render.
+            Task {
+                let (cols, rows) = self.lastSentSize
+                let size = (cols > 0 && rows > 0) ? "\(cols),\(rows)" : "80,24"
+                try? await self.sendControlCommand(
+                    "refresh-client -C \(size)\n", type: .ignored)
+            }
         }
 
         tmuxService.onSessionsChanged = { [weak self] in

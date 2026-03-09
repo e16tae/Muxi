@@ -52,6 +52,11 @@ final class ConnectionManager {
     func setStateForTesting(_ newState: ConnectionState) {
         state = newState
     }
+
+    /// Test-only: trigger the onExit callback as if tmux sent `%exit`.
+    func simulateOnExit() {
+        tmuxService.onExit?()
+    }
     #endif
 
     /// The server we are currently connected (or connecting) to.
@@ -519,6 +524,14 @@ final class ConnectionManager {
         pendingInitialResize = true
         try await sendControlCommand("refresh-client -C 80,24\n", type: .ignored)
 
+        // Tell tmux to switch to another session when the current one
+        // is destroyed (e.g. user types `exit`) instead of detaching
+        // the client.  This makes session exits seamless — tmux sends
+        // %session-changed instead of %exit, so we stay attached.
+        // %exit only fires when no sessions remain.
+        try await sendControlCommand(
+            "set-option -g detach-on-destroy off\n", type: .ignored)
+
         sshMonitorTask?.cancel()
         sshMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -652,70 +665,6 @@ final class ConnectionManager {
     }
 
     // MARK: - Reconnect
-
-    /// Attempt to re-attach to another tmux session using the existing SSH
-    /// connection. Called when the current session exits (`%exit`) but the
-    /// SSH link is still alive.
-    ///
-    /// Cleans up control-mode state (channel, buffers, pending commands)
-    /// without tearing down SSH, queries remaining sessions, and attaches
-    /// to the best available one. If no sessions remain, disconnects.
-    /// If SSH has died, falls back to ``reconnect()``.
-    func reattach() async {
-        guard case .attached(let exitedSession) = state else { return }
-
-        logger.info("Reattach: current session exited, looking for alternatives")
-
-        // Cancel any pending scrollback fetch.
-        if let continuation = scrollbackContinuation {
-            scrollbackContinuation = nil
-            continuation.resume(throwing: ScrollbackError.notAttached)
-        }
-
-        // Clean up control-mode state but keep SSH alive.
-        sshMonitorTask?.cancel()
-        sshMonitorTask = nil
-        activeChannel = nil
-        tmuxService.resetLineBuffer()
-        paneBuffers = [:]
-        currentPanes = []
-        pendingCommands = []
-        activePaneId = nil
-        scrolledBackPanes = []
-        paneHasNewOutput = []
-        lastSentSize = (0, 0)
-        pendingInitialResize = false
-
-        do {
-            try await refreshSessions()
-
-            let serverID = currentServer?.id.uuidString
-            let targetSession: String?
-
-            if let sid = serverID,
-               let lastUsed = lastSessionStore.lastSessionName(forServerID: sid),
-               lastUsed != exitedSession,
-               sessions.contains(where: { $0.name == lastUsed }) {
-                targetSession = lastUsed
-            } else {
-                targetSession = sessions.first(where: { $0.name != exitedSession })?.name
-            }
-
-            if let target = targetSession {
-                try await performAttach(sessionName: target)
-                if let sid = serverID {
-                    lastSessionStore.save(sessionName: target, forServerID: sid)
-                }
-                logger.info("Reattach: attached to '\(target)'")
-            } else {
-                logger.info("Reattach: no sessions remaining, disconnecting")
-                disconnect()
-            }
-        } catch {
-            logger.error("Reattach failed (\(error)), falling back to reconnect")
-            await reconnect()
-        }
-    }
 
     /// Attempt to re-establish a dropped SSH connection using exponential
     /// backoff.
@@ -1032,9 +981,10 @@ final class ConnectionManager {
 
         tmuxService.onExit = { [weak self] in
             guard let self else { return }
-            // Only reattach if we were attached (not manually detaching).
             guard case .attached = self.state else { return }
-            Task { await self.reattach() }
+            // With detach-on-destroy off, %exit only fires when no
+            // sessions remain.  Just disconnect back to server list.
+            self.disconnect()
         }
 
         tmuxService.onError = { [weak self] message in

@@ -126,6 +126,19 @@ final class TmuxControlServiceTests: XCTestCase {
         XCTAssertEqual(receivedName, "work")
     }
 
+    func testHandleSessionsChanged() {
+        let service = TmuxControlService()
+        var called = false
+
+        service.onSessionsChanged = {
+            called = true
+        }
+
+        service.handleLine("%sessions-changed")
+
+        XCTAssertTrue(called)
+    }
+
     func testHandleExit() {
         let service = TmuxControlService()
         var exitCalled = false

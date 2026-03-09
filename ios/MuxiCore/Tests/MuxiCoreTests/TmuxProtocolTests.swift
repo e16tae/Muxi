@@ -109,6 +109,16 @@ private func string(from ptr: UnsafePointer<CChar>) -> String {
     }
 }
 
+@Test func testParseSessionsChanged() {
+    let line = "%sessions-changed"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_SESSIONS_CHANGED)
+    }
+}
+
 @Test func testParseExit() {
     let line = "%exit"
     line.withCString { cLine in

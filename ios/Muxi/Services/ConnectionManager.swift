@@ -131,6 +131,8 @@ final class ConnectionManager {
         case cursorQuery(paneId: String)
         /// `capture-pane -e -p -S -<N> -t %<id>` — deliver to scrollback continuation.
         case scrollbackCapture
+        /// `list-sessions -F '...'` — refresh the session list.
+        case listSessions
         /// Any command whose response we don't need (send-keys, refresh-client, etc.).
         case ignored
     }
@@ -962,6 +964,9 @@ final class ConnectionManager {
                 }
             case .scrollbackCapture:
                 self.deliverScrollbackResponse(response)
+            case .listSessions:
+                self.sessions = TmuxControlService.parseFormattedSessionList(response)
+                self.logger.info("Sessions refreshed: \(self.sessions.count) sessions")
             case .ignored:
                 break
             }
@@ -977,6 +982,15 @@ final class ConnectionManager {
             }
             // refresh-client is sent in switchSession() right after switch-client,
             // so no need to send it again here.
+        }
+
+        tmuxService.onSessionsChanged = { [weak self] in
+            guard let self else { return }
+            Task {
+                try? await self.sendControlCommand(
+                    "list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}'\n",
+                    type: .listSessions)
+            }
         }
 
         tmuxService.onExit = { [weak self] in

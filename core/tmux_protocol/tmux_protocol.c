@@ -239,6 +239,15 @@ static int parse_exit(const char *rest, TmuxMessage *msg) {
 }
 
 /**
+ * Parse %sessions-changed (no arguments)
+ */
+static int parse_sessions_changed(const char *rest, TmuxMessage *msg) {
+    (void)rest;
+    (void)msg;
+    return TMUX_MSG_SESSIONS_CHANGED;
+}
+
+/**
  * Parse %error <message>
  */
 static int parse_error(const char *rest, TmuxMessage *msg) {
@@ -263,6 +272,7 @@ static const keyword_entry_t keyword_table[] = {
     KW_ENTRY("%window-add",       parse_window_add),
     KW_ENTRY("%window-close",     parse_window_close),
     KW_ENTRY("%session-changed",  parse_session_changed),
+    KW_ENTRY("%sessions-changed", parse_sessions_changed),
     KW_ENTRY("%begin",            parse_begin),
     KW_ENTRY("%end",              parse_end),
     KW_ENTRY("%exit",             parse_exit),

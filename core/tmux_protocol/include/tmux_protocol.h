@@ -24,6 +24,7 @@
 #define TMUX_MSG_END              7
 #define TMUX_MSG_EXIT             8
 #define TMUX_MSG_ERROR            9
+#define TMUX_MSG_SESSIONS_CHANGED 10
 
 /* ---------- Buffer size constants ---------- */
 #define TMUX_ID_MAX    32

@@ -32,6 +32,9 @@ final class TmuxControlService {
     /// Called when the active session changes.
     var onSessionChanged: ((_ sessionId: String, _ name: String) -> Void)?
 
+    /// Called when the session list changes (session created or destroyed).
+    var onSessionsChanged: (() -> Void)?
+
     /// Called when the tmux server exits.
     var onExit: (() -> Void)?
 
@@ -193,6 +196,9 @@ final class TmuxControlService {
                 let sessionId = extractString(from: &msg.session_id, capacity: Int(TMUX_ID_MAX))
                 let name = extractString(from: &msg.session_name, capacity: Int(TMUX_NAME_MAX))
                 onSessionChanged?(sessionId, name)
+
+            case TMUX_MSG_SESSIONS_CHANGED:
+                onSessionsChanged?()
 
             case TMUX_MSG_EXIT:
                 onExit?()

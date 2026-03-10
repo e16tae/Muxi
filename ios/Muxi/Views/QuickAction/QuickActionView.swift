@@ -66,18 +66,6 @@ extension QuickAction {
             category: .pane
         ),
         QuickAction(
-            title: "Next Pane",
-            icon: "arrow.right.square",
-            command: "select-pane -t :.+",
-            category: .pane
-        ),
-        QuickAction(
-            title: "Previous Pane",
-            icon: "arrow.left.square",
-            command: "select-pane -t :.-",
-            category: .pane
-        ),
-        QuickAction(
             title: "Zoom/Unzoom",
             icon: "arrow.up.left.and.arrow.down.right",
             command: "resize-pane -Z",

@@ -36,9 +36,9 @@ struct QuickActionModelTests {
         #expect(ids.count == uniqueIDs.count, "All action IDs should be unique")
     }
 
-    @Test("Total predefined action count is 11")
+    @Test("Total predefined action count is 9")
     func totalActionCount() {
-        #expect(QuickAction.allActions.count == 11)
+        #expect(QuickAction.allActions.count == 9)
     }
 }
 
@@ -47,10 +47,10 @@ struct QuickActionModelTests {
 @Suite("QuickAction Category Tests")
 struct QuickActionCategoryTests {
 
-    @Test("Pane actions count is 6")
+    @Test("Pane actions count is 4")
     func paneActionCount() {
         let pane = QuickAction.actions(for: .pane)
-        #expect(pane.count == 6)
+        #expect(pane.count == 4)
     }
 
     @Test("Window actions count is 5")
@@ -121,20 +121,6 @@ struct QuickActionCommandTests {
         #expect(action?.command == "kill-pane")
     }
 
-    @Test("Next pane command is correct")
-    func nextPane() {
-        let action = QuickAction.paneActions.first { $0.title == "Next Pane" }
-        #expect(action != nil)
-        #expect(action?.command == "select-pane -t :.+")
-    }
-
-    @Test("Previous pane command is correct")
-    func previousPane() {
-        let action = QuickAction.paneActions.first { $0.title == "Previous Pane" }
-        #expect(action != nil)
-        #expect(action?.command == "select-pane -t :.-")
-    }
-
     @Test("Zoom command is correct")
     func zoomUnzoom() {
         let action = QuickAction.paneActions.first { $0.title == "Zoom/Unzoom" }
@@ -181,7 +167,7 @@ struct QuickActionInputTests {
     @Test("Non-rename actions do not require input")
     func nonRenameActionsDontRequireInput() {
         let nonInput = QuickAction.allActions.filter { !$0.requiresInput }
-        #expect(nonInput.count == 10)
+        #expect(nonInput.count == 8)
         for action in nonInput {
             #expect(action.requiresInput == false)
         }

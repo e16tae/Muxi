@@ -121,8 +121,9 @@ struct TerminalSessionView: View {
                             get: { connectionManager.activePaneId },
                             set: { connectionManager.activePaneId = $0 }
                         ),
-                        onPaneTapped: { _ in
+                        onPaneTapped: { paneId in
                             isKeyboardActive = true
+                            sendTmuxCommand("select-pane -t \(paneId)")
                         },
                         onPaste: { text in
                             pasteToActivePane(text)

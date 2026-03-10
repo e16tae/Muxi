@@ -87,18 +87,6 @@ extension QuickAction {
             category: .window
         ),
         QuickAction(
-            title: "Next Window",
-            icon: "arrow.right",
-            command: "next-window",
-            category: .window
-        ),
-        QuickAction(
-            title: "Previous Window",
-            icon: "arrow.left",
-            command: "previous-window",
-            category: .window
-        ),
-        QuickAction(
             title: "Rename Window",
             icon: "pencil",
             command: "rename-window",

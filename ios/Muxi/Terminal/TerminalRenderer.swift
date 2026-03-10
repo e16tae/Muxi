@@ -84,6 +84,12 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     var buffer: TerminalBuffer?
     var needsRedraw: Bool = true
 
+    /// Cached viewport size in points, derived from the drawable size.
+    /// Updated in `drawableSizeWillChange` to guarantee it matches the
+    /// actual rendering target — unlike `view.bounds`, which can lag
+    /// behind the drawable during animated resizes (e.g. keyboard).
+    private var cachedViewportSize: SIMD2<Float> = .zero
+
     // MARK: - Scrollback
 
     /// When set, the renderer reads from this buffer instead of the live buffer.
@@ -495,11 +501,18 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     // MARK: - MTKViewDelegate
 
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        let scale = view.contentScaleFactor
+        cachedViewportSize = SIMD2<Float>(
+            Float(size.width / scale),
+            Float(size.height / scale)
+        )
         needsRedraw = true
+        view.setNeedsDisplay()
     }
 
     func draw(in view: MTKView) {
         guard let pipelineState,
+              cachedViewportSize.x > 0, cachedViewportSize.y > 0,
               let drawable = view.currentDrawable,
               let renderPassDesc = view.currentRenderPassDescriptor,
               let commandBuffer = commandQueue.makeCommandBuffer(),
@@ -517,12 +530,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
             needsRedraw = false
         }
 
-        // Use bounds (points) not drawableSize (pixels) because vertex
-        // positions are computed in point coordinates (col * cellWidth).
-        var viewportSize = SIMD2<Float>(
-            Float(view.bounds.width),
-            Float(view.bounds.height)
-        )
+        var viewportSize = cachedViewportSize
 
         encoder.setRenderPipelineState(pipelineState)
 

@@ -223,13 +223,15 @@ struct PaneContainerView: View {
                     if index < frames.count {
                         let frame = frames[index]
 
+                        let isActive = pane.id == activePaneId
+
                         TerminalView(
                             buffer: pane.buffer,
                             theme: theme,
                             onPaste: onPaste,
                             fontSize: fontSize,
-                            scrollbackBuffer: scrollbackBuffer,
-                            scrollOffset: scrollbackOffset,
+                            scrollbackBuffer: isActive ? scrollbackBuffer : nil,
+                            scrollOffset: isActive ? scrollbackOffset : 0,
                             onScrollOffsetChanged: { delta in
                                 onScrollOffsetChanged?(pane.id, delta)
                             }

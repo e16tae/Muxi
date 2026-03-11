@@ -29,6 +29,9 @@ final class TmuxControlService {
     /// Called when a window is closed.
     var onWindowClose: ((_ windowId: String) -> Void)?
 
+    /// Called when a window is renamed.
+    var onWindowRenamed: ((_ windowId: String, _ name: String) -> Void)?
+
     /// Called when the active session changes.
     var onSessionChanged: ((_ sessionId: String, _ name: String) -> Void)?
 
@@ -198,6 +201,15 @@ final class TmuxControlService {
                 onWindowAdd?(windowId)
 
             case TMUX_MSG_WINDOW_CLOSE:
+                let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                onWindowClose?(windowId)
+
+            case TMUX_MSG_WINDOW_RENAMED:
+                let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                let name = extractString(from: &msg.window_name, capacity: Int(TMUX_NAME_MAX))
+                onWindowRenamed?(windowId, name)
+
+            case TMUX_MSG_UNLINKED_WINDOW_CLOSE:
                 let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
                 onWindowClose?(windowId)
 

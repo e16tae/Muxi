@@ -50,7 +50,7 @@ struct TerminalView: UIViewRepresentable {
         let font = UIFont(name: "Sarasa Term K Nerd Font", size: fontSize)
             ?? UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
 
-        if let renderer = TerminalRenderer(device: device, font: font, theme: theme) {
+        if let renderer = TerminalRenderer(device: device, font: font, theme: theme, scale: mtkView.contentScaleFactor) {
             renderer.buffer = buffer
             mtkView.delegate = renderer
             context.coordinator.renderer = renderer
@@ -161,6 +161,13 @@ struct TerminalView: UIViewRepresentable {
 
         // Update focus state.
         context.coordinator.renderer?.isFocused = isFocused
+
+        // Update atlas scale if contentScaleFactor changed (e.g. moved between displays).
+        if let renderer = context.coordinator.renderer,
+           renderer.currentScale != mtkView.contentScaleFactor {
+            renderer.updateScale(mtkView.contentScaleFactor)
+            context.coordinator.requestRedraw()
+        }
     }
 
     // MARK: - Coordinator

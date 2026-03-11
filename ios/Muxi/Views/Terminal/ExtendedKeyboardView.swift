@@ -33,10 +33,6 @@ struct ExtendedKeyboardView: View {
                 }
                 .accessibilityValue(inputHandler.altActive ? "Active" : "Inactive")
 
-                Divider()
-                    .frame(height: 24)
-                    .background(MuxiTokens.Colors.borderDefault)
-
                 // Arrow keys
                 keyButton("\u{2190}") { send(key: .arrowLeft) }
                     .accessibilityLabel("Arrow Left")
@@ -47,11 +43,17 @@ struct ExtendedKeyboardView: View {
                 keyButton("\u{2192}") { send(key: .arrowRight) }
                     .accessibilityLabel("Arrow Right")
             }
-            .padding(.horizontal, MuxiTokens.Spacing.lg)
-            .padding(.vertical, MuxiTokens.Spacing.xs)
+            .padding(.horizontal, MuxiTokens.Spacing.md)
+            .padding(.vertical, MuxiTokens.Spacing.sm)
         }
-        .frame(height: 44)
-        .background(theme.background.color)
+        .background(MuxiTokens.Colors.surfaceRaised)
+        .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.md))
+        .overlay(
+            RoundedRectangle(cornerRadius: MuxiTokens.Radius.md)
+                .stroke(MuxiTokens.Colors.borderDefault, lineWidth: 1)
+        )
+        .padding(.horizontal, MuxiTokens.Spacing.sm)
+        .padding(.vertical, MuxiTokens.Spacing.xs)
     }
 
     // MARK: - Key Button
@@ -63,8 +65,6 @@ struct ExtendedKeyboardView: View {
                 .font(MuxiTokens.Typography.label.monospaced())
                 .foregroundStyle(MuxiTokens.Colors.textPrimary)
                 .frame(minWidth: 36, minHeight: 32)
-                .background(MuxiTokens.Colors.accentMuted)
-                .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
         }
         .buttonStyle(.plain)
     }
@@ -78,7 +78,7 @@ struct ExtendedKeyboardView: View {
                 .font(MuxiTokens.Typography.label.monospaced())
                 .foregroundStyle(active ? theme.background.color : MuxiTokens.Colors.textPrimary)
                 .frame(minWidth: 36, minHeight: 32)
-                .background(active ? MuxiTokens.Colors.accentDefault : MuxiTokens.Colors.accentMuted)
+                .background(active ? MuxiTokens.Colors.accentDefault : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
         }
         .buttonStyle(.plain)

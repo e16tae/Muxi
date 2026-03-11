@@ -44,13 +44,11 @@ struct ToolbarView: View {
                 Image(systemName: isSessionMode ? "rectangle.split.2x2" : "square.stack")
                     .font(MuxiTokens.Typography.body)
                     .foregroundStyle(MuxiTokens.Colors.accentDefault)
-                    .frame(width: 32, height: 32)
+                    .frame(width: 40, height: 40)
+                    .background(MuxiTokens.Colors.surfaceRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
             }
-
-            // Separator
-            Rectangle()
-                .fill(MuxiTokens.Colors.borderDefault)
-                .frame(width: 1, height: 24)
+            .buttonStyle(.plain)
 
             // Pill area (fills remaining space)
             Group {
@@ -72,14 +70,11 @@ struct ToolbarView: View {
                     )
                 } else {
                     if connectionManager.currentWindows.isEmpty {
-                        // Fallback before window list arrives
                         Text(sessionName)
                             .font(MuxiTokens.Typography.label).fontWeight(.semibold)
                             .foregroundStyle(MuxiTokens.Colors.textPrimary)
                             .padding(.horizontal, MuxiTokens.Spacing.md)
                             .padding(.vertical, MuxiTokens.Spacing.xs)
-                            .background(MuxiTokens.Colors.surfaceElevated)
-                            .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.md))
                     } else {
                         WindowPanePillsView(
                             windows: connectionManager.currentWindows,
@@ -112,12 +107,11 @@ struct ToolbarView: View {
                     }
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-
-            // Separator
-            Rectangle()
-                .fill(MuxiTokens.Colors.borderDefault)
-                .frame(width: 1, height: 24)
+            .padding(.horizontal, MuxiTokens.Spacing.md)
+            .padding(.vertical, MuxiTokens.Spacing.sm)
+            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+            .background(MuxiTokens.Colors.surfaceRaised)
+            .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.md))
 
             // + menu
             PlusMenuView(
@@ -135,6 +129,9 @@ struct ToolbarView: View {
                     onNewSession?()
                 }
             )
+            .frame(width: 40, height: 40)
+            .background(MuxiTokens.Colors.surfaceRaised)
+            .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
 
             // Keyboard toggle
             Button {
@@ -145,10 +142,13 @@ struct ToolbarView: View {
                     : "keyboard")
                     .font(MuxiTokens.Typography.body)
                     .foregroundStyle(MuxiTokens.Colors.accentDefault)
+                    .frame(width: 40, height: 40)
+                    .background(MuxiTokens.Colors.surfaceRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
             }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, MuxiTokens.Spacing.lg)
+        .padding(.horizontal, MuxiTokens.Spacing.sm)
         .padding(.vertical, MuxiTokens.Spacing.sm)
-        .background(MuxiTokens.Colors.surfaceDefault)
     }
 }

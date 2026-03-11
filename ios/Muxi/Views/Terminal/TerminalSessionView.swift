@@ -18,7 +18,7 @@ struct TerminalSessionView: View {
     @State private var scrollbackCaches: [String: TerminalBuffer] = [:]
     @State private var showNewSessionAlert = false
     @State private var newSessionName = ""
-    @State private var keyboardHeight: CGFloat = 0
+    @State private var isKeyboardVisible = false
     @State private var isSessionMode = false
     @State private var showRenameAlert = false
     @State private var renameTarget: ToolbarView.RenameTarget?
@@ -92,7 +92,7 @@ struct TerminalSessionView: View {
                 }
             }
 
-            // Bottom toolbar
+            // Bottom toolbar — always visible
             ToolbarView(
                 connectionManager: connectionManager,
                 sessionName: sessionName,
@@ -136,14 +136,16 @@ struct TerminalSessionView: View {
                 }
             )
 
-            // Extended keyboard — always visible
-            ExtendedKeyboardView(
-                theme: themeManager.currentTheme,
-                inputHandler: inputHandler,
-                onInput: { data in
-                    sendToActivePane(data)
-                }
-            )
+            // Extended keyboard — visible only with keyboard
+            if isKeyboardVisible {
+                ExtendedKeyboardView(
+                    theme: themeManager.currentTheme,
+                    inputHandler: inputHandler,
+                    onInput: { data in
+                        sendToActivePane(data)
+                    }
+                )
+            }
 
             // Hidden input view
             TerminalInputView(
@@ -168,13 +170,20 @@ struct TerminalSessionView: View {
             .frame(width: 1, height: 1)
             .opacity(0)
         }
-        .padding(.bottom, keyboardHeight)
-        .background(themeManager.currentTheme.background.color)
-        .ignoresSafeArea(.keyboard)
+        .background(
+            themeManager.currentTheme.background.color
+                .ignoresSafeArea()
+        )
         .onChange(of: connectionManager.activePaneId) { _, newValue in
             if newValue != nil {
                 isKeyboardActive = true
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            isKeyboardVisible = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            isKeyboardVisible = false
         }
         // Rename alert (shared between window and session)
         .alert(
@@ -222,26 +231,6 @@ struct TerminalSessionView: View {
                 }
             }
             Button("Cancel", role: .cancel) { newSessionName = "" }
-        }
-        .task {
-            for await notification in NotificationCenter.default.notifications(
-                named: UIResponder.keyboardWillChangeFrameNotification
-            ) {
-                guard let userInfo = notification.userInfo,
-                      let endFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
-                else { continue }
-                let screenHeight = UIScreen.main.bounds.height
-                let rawHeight = max(screenHeight - endFrame.origin.y, 0)
-                let safeAreaBottom = UIApplication.shared.connectedScenes
-                    .compactMap { ($0 as? UIWindowScene)?.keyWindow }
-                    .first?.safeAreaInsets.bottom ?? 0
-                let newHeight = max(rawHeight - safeAreaBottom, 0)
-                let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey]
-                    as? Double) ?? 0.25
-                withAnimation(.easeInOut(duration: duration)) {
-                    keyboardHeight = newHeight
-                }
-            }
         }
     }
 

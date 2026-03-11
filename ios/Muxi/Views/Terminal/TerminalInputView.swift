@@ -50,7 +50,7 @@ final class TerminalInputAccessor: UIView, UIKeyInput {
 
     // MARK: - Text Input Traits
 
-    var keyboardType: UIKeyboardType = .asciiCapable
+    var keyboardType: UIKeyboardType = .default
     var autocorrectionType: UITextAutocorrectionType = .no
     var autocapitalizationType: UITextAutocapitalizationType = .none
     var smartQuotesType: UITextSmartQuotesType = .no

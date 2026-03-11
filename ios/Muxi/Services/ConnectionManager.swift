@@ -75,6 +75,12 @@ final class ConnectionManager {
     /// Managed directly by ConnectionManager to avoid SwiftUI onChange timing issues.
     var activePaneId: String?
 
+    /// Windows in the current session, tracked via tmux notifications.
+    private(set) var currentWindows: [TmuxWindowInfo] = []
+
+    /// The currently active window ID (e.g., "@0").
+    private(set) var activeWindowId: String?
+
     /// The SSH service (exposed for actor-routed channel writes).
     private var sshServiceForWrites: SSHServiceProtocol { sshService }
 
@@ -120,6 +126,16 @@ final class ConnectionManager {
     /// again when re-establishing a dropped connection.
     private var cachedAuth: SSHAuth?
 
+    // MARK: - Window Info (lightweight, for toolbar pills)
+
+    /// Lightweight window info for the toolbar pills.
+    struct TmuxWindowInfo: Identifiable, Equatable {
+        let id: String       // e.g. "@0"
+        var name: String     // e.g. "bash"
+        var paneIds: [String] // e.g. ["%0", "%1"]
+        var isActive: Bool
+    }
+
     /// Tracks the type of each pending tmux command whose `%begin/%end`
     /// response has not yet arrived.  Every command sent through the
     /// control-mode channel generates a `%begin/%end` block; this queue
@@ -135,6 +151,8 @@ final class ConnectionManager {
         case listSessions
         /// `new-session -d -P -F '#{session_name}'` — parse created session name and switch to it.
         case createSession
+        /// `list-windows -F '...'` — refresh the window list.
+        case listWindows
         /// Any command whose response we don't need (send-keys, refresh-client, etc.).
         case ignored
     }
@@ -400,6 +418,8 @@ final class ConnectionManager {
         lastSentSize = (0, 0)
         pendingInitialResize = false
 
+        currentWindows = []
+        activeWindowId = nil
         scrolledBackPanes = []
         paneHasNewOutput = []
 
@@ -996,6 +1016,12 @@ final class ConnectionManager {
                     ))
                 }
                 Task { try? await self.switchSession(to: name) }
+            case .listWindows:
+                let parsed = Self.parseWindowList(response)
+                if !parsed.isEmpty || self.currentWindows.isEmpty {
+                    self.currentWindows = parsed
+                    self.activeWindowId = parsed.first(where: \.isActive)?.id
+                }
             case .ignored:
                 break
             }
@@ -1050,6 +1076,23 @@ final class ConnectionManager {
             // Log error but don't disconnect -- tmux errors can be non-fatal.
             self?.logger.error("TmuxControl error: \(message)")
         }
+    }
+
+    // MARK: - Window List Parsing
+
+    /// Parse the output of `list-windows -F '#{window_id}\t#{window_index}\t#{window_name}\t#{window_active}'`.
+    static func parseWindowList(_ output: String) -> [TmuxWindowInfo] {
+        output.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "\n")
+            .compactMap { line in
+                let parts = line.trimmingCharacters(in: .whitespaces)
+                    .split(separator: "\t", maxSplits: 3)
+                guard parts.count >= 4 else { return nil }
+                let id = String(parts[0])
+                let name = String(parts[2])
+                let isActive = parts[3] == "1"
+                return TmuxWindowInfo(id: id, name: name, paneIds: [], isActive: isActive)
+            }
     }
 
     /// Re-query the remote server for the current list of tmux sessions

@@ -111,6 +111,7 @@ struct TerminalSessionView: View {
                 },
                 onSelectWindowAndPane: { windowId, paneId in
                     isKeyboardActive = true
+                    connectionManager.activePaneId = paneId
                     Task {
                         try? await connectionManager.selectWindowAndPane(
                             windowId: windowId, paneId: paneId)

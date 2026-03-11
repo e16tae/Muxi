@@ -41,7 +41,7 @@ struct ToolbarView: View {
                     isSessionMode.toggle()
                 }
             } label: {
-                Image(systemName: isSessionMode ? "xmark" : "square.stack")
+                Image(systemName: isSessionMode ? "rectangle.split.2x2" : "square.stack")
                     .font(MuxiTokens.Typography.body)
                     .foregroundStyle(MuxiTokens.Colors.accentDefault)
                     .frame(width: 32, height: 32)
@@ -60,7 +60,6 @@ struct ToolbarView: View {
                         activeSessionName: sessionName,
                         onSelectSession: { name in
                             onSwitchSession?(name)
-                            isSessionMode = false
                         },
                         onRenameSession: { name in
                             renameTarget = .session(name: name)

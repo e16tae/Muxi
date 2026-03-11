@@ -52,8 +52,8 @@ struct PaneLayout {
 
 /// Container that manages one or more terminal panes.
 ///
-/// - **iPhone** (compact width): shows a single pane at a time with a tab
-///   selector along the bottom edge.
+/// - **iPhone** (compact width): shows the active pane (selected via
+///   toolbar pills).
 /// - **iPad** (regular width): arranges panes according to tmux layout
 ///   geometry, scaling each pane proportionally within the available space.
 struct PaneContainerView: View {
@@ -61,7 +61,7 @@ struct PaneContainerView: View {
     let theme: Theme
     var fontSize: CGFloat = 14
     @Binding var activePaneId: String?
-    /// Called when the user taps a pane (iPad) or selects a tab (iPhone).
+    /// Called when the user taps a pane.
     var onPaneTapped: ((String) -> Void)?
     var onPaste: ((String) -> Void)?
 
@@ -72,7 +72,6 @@ struct PaneContainerView: View {
     var showNewOutputIndicator: Bool = false
     var onReturnToLive: ((String) -> Void)?
 
-    @State private var selectedPaneIndex: Int = 0
     @Environment(\.horizontalSizeClass) private var sizeClass
 
     // MARK: - PaneInfo
@@ -107,104 +106,57 @@ struct PaneContainerView: View {
                 regularLayout
             }
         }
-        .onChange(of: panes.count) {
-            // Clamp selectedPaneIndex when panes are added / removed.
-            if panes.isEmpty {
-                selectedPaneIndex = 0
-            } else if selectedPaneIndex >= panes.count {
-                selectedPaneIndex = panes.count - 1
-            }
-        }
     }
 
     // MARK: - Compact (iPhone) Layout
 
     @ViewBuilder
     private var compactLayout: some View {
-        VStack(spacing: 0) {
-            if let pane = panes[safe: selectedPaneIndex] {
-                TerminalView(
-                    buffer: pane.buffer,
-                    theme: theme,
-                    onPaste: onPaste,
-                    fontSize: fontSize,
-                    scrollbackBuffer: scrollbackBuffer,
-                    scrollOffset: scrollbackOffset,
-                    onScrollOffsetChanged: { delta in
-                        onScrollOffsetChanged?(pane.id, delta)
-                    }
-                )
-                .overlay(alignment: .bottom) {
-                    if showNewOutputIndicator,
-                       scrollbackOffset > 0,
-                       pane.id == activePaneId {
-                        Button {
-                            onReturnToLive?(pane.id)
-                        } label: {
-                            HStack(spacing: MuxiTokens.Spacing.xs) {
-                                Image(systemName: "arrow.down")
-                                Text("New output")
-                            }
-                            .font(MuxiTokens.Typography.caption)
-                            .padding(.horizontal, MuxiTokens.Spacing.md)
-                            .padding(.vertical, MuxiTokens.Spacing.sm)
-                            .background(
-                                RoundedRectangle(
-                                    cornerRadius: MuxiTokens.Radius.sm,
-                                    style: .continuous
-                                )
-                                .fill(MuxiTokens.Colors.accentDefault)
-                            )
-                            .foregroundStyle(MuxiTokens.Colors.textPrimary)
-                        }
-                        .padding(.bottom, MuxiTokens.Spacing.md)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                    }
+        if let pane = panes.first(where: { $0.id == activePaneId }) ?? panes.first {
+            TerminalView(
+                buffer: pane.buffer,
+                theme: theme,
+                onPaste: onPaste,
+                fontSize: fontSize,
+                scrollbackBuffer: scrollbackBuffer,
+                scrollOffset: scrollbackOffset,
+                onScrollOffsetChanged: { delta in
+                    onScrollOffsetChanged?(pane.id, delta)
                 }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    activePaneId = pane.id
-                    onPaneTapped?(pane.id)
-                }
-                .onAppear { activePaneId = pane.id }
-            }
-
-            if panes.count > 1 {
-                paneTabBar
-            }
-        }
-    }
-
-    /// Horizontal scrolling tab bar for switching between panes on iPhone.
-    @ViewBuilder
-    private var paneTabBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: MuxiTokens.Spacing.md) {
-                ForEach(panes.indices, id: \.self) { index in
+            )
+            .overlay(alignment: .bottom) {
+                if showNewOutputIndicator,
+                   scrollbackOffset > 0,
+                   pane.id == activePaneId {
                     Button {
-                        selectedPaneIndex = index
-                        activePaneId = panes[index].id
-                        onPaneTapped?(panes[index].id)
+                        onReturnToLive?(pane.id)
                     } label: {
-                        Text("Pane \(index + 1)")
-                            .font(MuxiTokens.Typography.caption)
-                            .padding(.horizontal, MuxiTokens.Spacing.md)
-                            .padding(.vertical, MuxiTokens.Spacing.xs)
-                            .background(
-                                index == selectedPaneIndex
-                                    ? MuxiTokens.Colors.accentSubtle
-                                    : Color.clear
+                        HStack(spacing: MuxiTokens.Spacing.xs) {
+                            Image(systemName: "arrow.down")
+                            Text("New output")
+                        }
+                        .font(MuxiTokens.Typography.caption)
+                        .padding(.horizontal, MuxiTokens.Spacing.md)
+                        .padding(.vertical, MuxiTokens.Spacing.sm)
+                        .background(
+                            RoundedRectangle(
+                                cornerRadius: MuxiTokens.Radius.sm,
+                                style: .continuous
                             )
-                            .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
+                            .fill(MuxiTokens.Colors.accentDefault)
+                        )
+                        .foregroundStyle(MuxiTokens.Colors.textPrimary)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityHint("Switch to this pane")
+                    .padding(.bottom, MuxiTokens.Spacing.md)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
-            .padding(.horizontal, MuxiTokens.Spacing.lg)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                activePaneId = pane.id
+                onPaneTapped?(pane.id)
+            }
         }
-        .frame(height: 36)
-        .background(MuxiTokens.Colors.surfaceRaised)
     }
 
     // MARK: - Regular (iPad) Layout
@@ -314,13 +266,5 @@ struct PaneContainerView: View {
                     .offset(x: frame.x, y: frame.y + frame.height)
             }
         }
-    }
-}
-
-// MARK: - Safe Array Subscript
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
     }
 }

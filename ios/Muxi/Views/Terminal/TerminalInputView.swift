@@ -163,11 +163,6 @@ struct TerminalInputView: UIViewRepresentable {
     var onRawData: ((Data) -> Void)?
     @Binding var isActive: Bool
 
-    // Extended keyboard (displayed as inputAccessoryView above the keyboard)
-    var theme: Theme?
-    var inputHandler: InputHandler?
-    var onExtendedInput: ((Data) -> Void)?
-
     func makeCoordinator() -> Coordinator {
         Coordinator(isActive: $isActive)
     }
@@ -188,24 +183,6 @@ struct TerminalInputView: UIViewRepresentable {
             view.heightAnchor.constraint(equalToConstant: 1),
         ])
 
-        // Set up extended keyboard as inputAccessoryView
-        if let theme, let inputHandler {
-            let extKeyboard = ExtendedKeyboardView(
-                theme: theme,
-                inputHandler: inputHandler,
-                onInput: onExtendedInput
-            )
-            let hostingController = UIHostingController(rootView: extKeyboard)
-            hostingController.view.frame = CGRect(
-                x: 0, y: 0,
-                width: UIScreen.main.bounds.width, height: 44
-            )
-            hostingController.view.autoresizingMask = [.flexibleWidth]
-            hostingController.view.backgroundColor = theme.background.uiColor
-            view.setInputAccessoryView(hostingController.view)
-            context.coordinator.accessoryHostingController = hostingController
-        }
-
         context.coordinator.startObservingKeyboard()
         return view
     }
@@ -225,14 +202,7 @@ struct TerminalInputView: UIViewRepresentable {
             }
         }
 
-        // Update extended keyboard accessory view
-        if let theme, let inputHandler {
-            context.coordinator.accessoryHostingController?.rootView = ExtendedKeyboardView(
-                theme: theme,
-                inputHandler: inputHandler,
-                onInput: onExtendedInput
-            )
-        }
+        // Extended keyboard accessory view removed — now in VStack
     }
 
     // MARK: - Coordinator
@@ -240,7 +210,6 @@ struct TerminalInputView: UIViewRepresentable {
     final class Coordinator {
         @Binding var isActive: Bool
         weak var inputView: TerminalInputAccessor?
-        var accessoryHostingController: UIHostingController<ExtendedKeyboardView>?
         private var keyboardObserver: Any?
 
         init(isActive: Binding<Bool>) {

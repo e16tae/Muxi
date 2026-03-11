@@ -317,3 +317,45 @@ private func string(from ptr: UnsafePointer<CChar>) -> String {
 
     #expect(msgType == TMUX_MSG_UNKNOWN)
 }
+
+// MARK: - Window Renamed & Unlinked Window Close Tests
+
+@Test func testParseWindowRenamed() {
+    let line = "%window-renamed @0 vim"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_WINDOW_RENAMED)
+        let windowId = withUnsafePointer(to: &msg.window_id.0) { string(from: $0) }
+        #expect(windowId == "@0")
+        let windowName = withUnsafePointer(to: &msg.window_name.0) { string(from: $0) }
+        #expect(windowName == "vim")
+    }
+}
+
+@Test func testParseWindowRenamedWithSpaces() {
+    let line = "%window-renamed @2 my window name"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_WINDOW_RENAMED)
+        let windowId = withUnsafePointer(to: &msg.window_id.0) { string(from: $0) }
+        #expect(windowId == "@2")
+        let windowName = withUnsafePointer(to: &msg.window_name.0) { string(from: $0) }
+        #expect(windowName == "my window name")
+    }
+}
+
+@Test func testParseUnlinkedWindowClose() {
+    let line = "%unlinked-window-close @3"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_UNLINKED_WINDOW_CLOSE)
+        let windowId = withUnsafePointer(to: &msg.window_id.0) { string(from: $0) }
+        #expect(windowId == "@3")
+    }
+}

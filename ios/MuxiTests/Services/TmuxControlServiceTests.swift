@@ -152,6 +152,48 @@ final class TmuxControlServiceTests: XCTestCase {
         XCTAssertTrue(exitCalled)
     }
 
+    func testHandleWindowRenamed() {
+        let service = TmuxControlService()
+        var receivedWindowId: String?
+        var receivedName: String?
+
+        service.onWindowRenamed = { windowId, name in
+            receivedWindowId = windowId
+            receivedName = name
+        }
+
+        service.handleLine("%window-renamed @0 vim")
+
+        XCTAssertEqual(receivedWindowId, "@0")
+        XCTAssertEqual(receivedName, "vim")
+    }
+
+    func testHandleWindowRenamedWithSpaces() {
+        let service = TmuxControlService()
+        var receivedName: String?
+
+        service.onWindowRenamed = { _, name in
+            receivedName = name
+        }
+
+        service.handleLine("%window-renamed @1 my window")
+
+        XCTAssertEqual(receivedName, "my window")
+    }
+
+    func testHandleUnlinkedWindowClose() {
+        let service = TmuxControlService()
+        var receivedWindowId: String?
+
+        service.onWindowClose = { windowId in
+            receivedWindowId = windowId
+        }
+
+        service.handleLine("%unlinked-window-close @3")
+
+        XCTAssertEqual(receivedWindowId, "@3")
+    }
+
     func testHandleUnknownLine() {
         let service = TmuxControlService()
         var anyCalled = false
@@ -160,6 +202,7 @@ final class TmuxControlServiceTests: XCTestCase {
         service.onLayoutChange = { _, _ in anyCalled = true }
         service.onWindowAdd = { _ in anyCalled = true }
         service.onWindowClose = { _ in anyCalled = true }
+        service.onWindowRenamed = { _, _ in anyCalled = true }
         service.onSessionChanged = { _, _ in anyCalled = true }
         service.onExit = { anyCalled = true }
 
@@ -175,6 +218,8 @@ final class TmuxControlServiceTests: XCTestCase {
         service.handleLine("%layout-change @0 abcd,80x24,0,0,0")
         service.handleLine("%window-add @1")
         service.handleLine("%window-close @2")
+        service.handleLine("%window-renamed @0 vim")
+        service.handleLine("%unlinked-window-close @3")
         service.handleLine("%session-changed $0 name")
         service.handleLine("%exit")
     }

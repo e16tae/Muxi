@@ -3,8 +3,7 @@ import CoreText
 import os
 
 /// The terminal session screen that combines all terminal-related components
-/// into a single view: pane container, extended keyboard, quick action button,
-/// and a detach toolbar button.
+/// into a single view: pane container, bottom toolbar, and extended keyboard.
 ///
 /// Displayed when ``ConnectionManager/state`` is `.attached(sessionName:)`.
 struct TerminalSessionView: View {
@@ -20,6 +19,10 @@ struct TerminalSessionView: View {
     @State private var showNewSessionAlert = false
     @State private var newSessionName = ""
     @State private var keyboardHeight: CGFloat = 0
+    @State private var isSessionMode = false
+    @State private var showRenameAlert = false
+    @State private var renameTarget: ToolbarView.RenameTarget?
+    @State private var renameText = ""
 
     /// Build pane info from ConnectionManager's live pane data.
     private var panes: [PaneContainerView.PaneInfo] {
@@ -40,75 +43,7 @@ struct TerminalSessionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Custom toolbar
-            HStack {
-                Button {
-                    isKeyboardActive = false
-                    connectionManager.disconnect()
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(MuxiTokens.Typography.body)
-                        .foregroundStyle(MuxiTokens.Colors.accentDefault)
-                }
-
-                Spacer()
-
-                // Session switcher dropdown
-                Menu {
-                    ForEach(connectionManager.sessions) { session in
-                        Button {
-                            guard session.name != sessionName else { return }
-                            Task {
-                                do {
-                                    try await connectionManager.switchSession(to: session.name)
-                                    logger.info("Switched to session: \(session.name)")
-                                } catch {
-                                    logger.error("Failed to switch to '\(session.name)': \(error.localizedDescription)")
-                                }
-                            }
-                        } label: {
-                            if session.name == sessionName {
-                                Label(session.name, systemImage: "checkmark")
-                            } else {
-                                Text(session.name)
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    Button {
-                        showNewSessionAlert = true
-                    } label: {
-                        Label("New Session", systemImage: "plus")
-                    }
-                } label: {
-                    HStack(spacing: MuxiTokens.Spacing.xs) {
-                        Text(sessionName)
-                            .font(MuxiTokens.Typography.title)
-                            .foregroundStyle(MuxiTokens.Colors.textPrimary)
-                        Image(systemName: "chevron.down")
-                            .font(MuxiTokens.Typography.caption)
-                            .foregroundStyle(MuxiTokens.Colors.textSecondary)
-                    }
-                }
-
-                Spacer()
-
-                Button {
-                    isKeyboardActive.toggle()
-                } label: {
-                    Image(systemName: isKeyboardActive
-                          ? "keyboard.chevron.compact.down"
-                          : "keyboard")
-                        .font(MuxiTokens.Typography.body)
-                        .foregroundStyle(MuxiTokens.Colors.accentDefault)
-                }
-            }
-            .padding(.horizontal, MuxiTokens.Spacing.lg)
-            .padding(.vertical, MuxiTokens.Spacing.sm)
-            .background(MuxiTokens.Colors.surfaceDefault)
-
+            // Terminal content — edge to edge from top
             if panes.isEmpty {
                 placeholderView
             } else {
@@ -138,7 +73,9 @@ struct TerminalSessionView: View {
                         onScrollOffsetChanged: { paneId, delta in
                             handleScrollDelta(paneId: paneId, delta: delta)
                         },
-                        showNewOutputIndicator: connectionManager.activePaneId.map { connectionManager.paneHasNewOutput.contains($0) } ?? false,
+                        showNewOutputIndicator: connectionManager.activePaneId.map {
+                            connectionManager.paneHasNewOutput.contains($0)
+                        } ?? false,
                         onReturnToLive: { paneId in
                             returnToLive(paneId: paneId)
                         }
@@ -155,6 +92,60 @@ struct TerminalSessionView: View {
                 }
             }
 
+            // Bottom toolbar
+            ToolbarView(
+                connectionManager: connectionManager,
+                sessionName: sessionName,
+                isKeyboardActive: $isKeyboardActive,
+                isSessionMode: $isSessionMode,
+                showRenameAlert: $showRenameAlert,
+                renameTarget: $renameTarget,
+                renameText: $renameText,
+                onSendCommand: { command in
+                    sendTmuxCommand(command)
+                },
+                onSelectWindow: { windowId in
+                    Task {
+                        try? await connectionManager.selectWindow(windowId)
+                    }
+                },
+                onSelectWindowAndPane: { windowId, paneId in
+                    isKeyboardActive = true
+                    Task {
+                        try? await connectionManager.selectWindowAndPane(
+                            windowId: windowId, paneId: paneId)
+                    }
+                },
+                onNewSession: {
+                    showNewSessionAlert = true
+                },
+                onSwitchSession: { name in
+                    Task {
+                        do {
+                            try await connectionManager.switchSession(to: name)
+                            logger.info("Switched to session: \(name)")
+                        } catch {
+                            logger.error("Failed to switch: \(error.localizedDescription)")
+                        }
+                    }
+                },
+                onKillSession: { name in
+                    Task {
+                        try? await connectionManager.killSession(name)
+                    }
+                }
+            )
+
+            // Extended keyboard — always visible
+            ExtendedKeyboardView(
+                theme: themeManager.currentTheme,
+                inputHandler: inputHandler,
+                onInput: { data in
+                    sendToActivePane(data)
+                }
+            )
+
+            // Hidden input view
             TerminalInputView(
                 onText: { text in
                     for char in text {
@@ -172,33 +163,49 @@ struct TerminalSessionView: View {
                 onRawData: { data in
                     sendToActivePane(data)
                 },
-                isActive: $isKeyboardActive,
-                theme: themeManager.currentTheme,
-                inputHandler: inputHandler,
-                onExtendedInput: { data in
-                    sendToActivePane(data)
-                }
+                isActive: $isKeyboardActive
             )
             .frame(width: 1, height: 1)
             .opacity(0)
-        }
-        .overlay(alignment: .bottomTrailing) {
-            QuickActionButton(onAction: { command in
-                sendTmuxCommand(command)
-            })
-            .padding(.trailing, MuxiTokens.Spacing.lg)
-            .padding(.bottom, MuxiTokens.Spacing.lg)
         }
         .padding(.bottom, keyboardHeight)
         .background(themeManager.currentTheme.background.color)
         .ignoresSafeArea(.keyboard)
         .onChange(of: connectionManager.activePaneId) { _, newValue in
-            // Reactivate keyboard when a new pane becomes active
-            // (e.g. after session switch or pane creation).
             if newValue != nil {
                 isKeyboardActive = true
             }
         }
+        // Rename alert (shared between window and session)
+        .alert(
+            renameAlertTitle,
+            isPresented: $showRenameAlert
+        ) {
+            TextField("Name", text: $renameText)
+            Button("Rename") {
+                let trimmed = renameText.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else { return }
+                switch renameTarget {
+                case .window(let id):
+                    Task {
+                        try? await connectionManager.renameWindow(id, to: trimmed)
+                    }
+                case .session(let name):
+                    Task {
+                        try? await connectionManager.renameSession(name, to: trimmed)
+                    }
+                case nil:
+                    break
+                }
+                renameTarget = nil
+                renameText = ""
+            }
+            Button("Cancel", role: .cancel) {
+                renameTarget = nil
+                renameText = ""
+            }
+        }
+        // New session alert (kept from existing code)
         .alert("New Session", isPresented: $showNewSessionAlert) {
             TextField("Optional name", text: $newSessionName)
             Button("Create") {
@@ -208,7 +215,7 @@ struct TerminalSessionView: View {
                 Task {
                     do {
                         try await connectionManager.createAndSwitchToNewSession(name: name)
-                        logger.info("Created and switched to session: \(name ?? "(auto)")")
+                        logger.info("Created session: \(name ?? "(auto)")")
                     } catch {
                         logger.error("Failed to create session: \(error.localizedDescription)")
                     }
@@ -217,20 +224,35 @@ struct TerminalSessionView: View {
             Button("Cancel", role: .cancel) { newSessionName = "" }
         }
         .task {
-            for await notification in NotificationCenter.default.notifications(named: UIResponder.keyboardWillChangeFrameNotification) {
+            for await notification in NotificationCenter.default.notifications(
+                named: UIResponder.keyboardWillChangeFrameNotification
+            ) {
                 guard let userInfo = notification.userInfo,
-                      let endFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { continue }
+                      let endFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect
+                else { continue }
                 let screenHeight = UIScreen.main.bounds.height
                 let rawHeight = max(screenHeight - endFrame.origin.y, 0)
                 let safeAreaBottom = UIApplication.shared.connectedScenes
                     .compactMap { ($0 as? UIWindowScene)?.keyWindow }
                     .first?.safeAreaInsets.bottom ?? 0
                 let newHeight = max(rawHeight - safeAreaBottom, 0)
-                let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey] as? Double) ?? 0.25
+                let duration = (userInfo[UIResponder.keyboardAnimationDurationUserInfoKey]
+                    as? Double) ?? 0.25
                 withAnimation(.easeInOut(duration: duration)) {
                     keyboardHeight = newHeight
                 }
             }
+        }
+    }
+
+    private var renameAlertTitle: String {
+        switch renameTarget {
+        case .window:
+            return "Rename Window"
+        case .session:
+            return "Rename Session"
+        case nil:
+            return "Rename"
         }
     }
 

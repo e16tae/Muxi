@@ -57,6 +57,16 @@ final class ConnectionManager {
     func simulateOnExit() {
         tmuxService.onExit?()
     }
+
+    /// Test-only: override the sessions array for unit tests.
+    func setSessionsForTesting(_ newSessions: [TmuxSession]) {
+        sessions = newSessions
+    }
+
+    func setWindowsForTesting(_ windows: [TmuxWindowInfo], activeId: String? = nil) {
+        currentWindows = windows
+        activeWindowId = activeId
+    }
     #endif
 
     /// The server we are currently connected (or connecting) to.
@@ -74,6 +84,12 @@ final class ConnectionManager {
     /// The currently active (focused) pane ID, e.g. "%0".
     /// Managed directly by ConnectionManager to avoid SwiftUI onChange timing issues.
     var activePaneId: String?
+
+    /// Windows in the current session, tracked via tmux notifications.
+    private(set) var currentWindows: [TmuxWindowInfo] = []
+
+    /// The currently active window ID (e.g., "@0").
+    private(set) var activeWindowId: String?
 
     /// The SSH service (exposed for actor-routed channel writes).
     private var sshServiceForWrites: SSHServiceProtocol { sshService }
@@ -120,6 +136,16 @@ final class ConnectionManager {
     /// again when re-establishing a dropped connection.
     private var cachedAuth: SSHAuth?
 
+    // MARK: - Window Info (lightweight, for toolbar pills)
+
+    /// Lightweight window info for the toolbar pills.
+    struct TmuxWindowInfo: Identifiable, Equatable {
+        let id: String       // e.g. "@0"
+        var name: String     // e.g. "bash"
+        var paneIds: [String] // e.g. ["%0", "%1"]
+        var isActive: Bool
+    }
+
     /// Tracks the type of each pending tmux command whose `%begin/%end`
     /// response has not yet arrived.  Every command sent through the
     /// control-mode channel generates a `%begin/%end` block; this queue
@@ -135,6 +161,8 @@ final class ConnectionManager {
         case listSessions
         /// `new-session -d -P -F '#{session_name}'` — parse created session name and switch to it.
         case createSession
+        /// `list-windows -F '...'` — refresh the window list.
+        case listWindows
         /// Any command whose response we don't need (send-keys, refresh-client, etc.).
         case ignored
     }
@@ -400,6 +428,8 @@ final class ConnectionManager {
         lastSentSize = (0, 0)
         pendingInitialResize = false
 
+        currentWindows = []
+        activeWindowId = nil
         scrolledBackPanes = []
         paneHasNewOutput = []
 
@@ -538,6 +568,9 @@ final class ConnectionManager {
         try await sendControlCommand(
             "set-option -g detach-on-destroy off\n", type: .ignored)
 
+        // Request window list so the toolbar can show window pills.
+        requestWindowListRefresh()
+
         sshMonitorTask?.cancel()
         sshMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -627,6 +660,59 @@ final class ConnectionManager {
             logger.info("Creating new session with tmux default name")
             try await sendControlCommand(
                 "new-session -d -P -F '#{session_name}'\n", type: .createSession)
+        }
+    }
+
+    // MARK: - Window/Session Commands
+
+    /// Switch to a specific window by ID.
+    func selectWindow(_ windowId: String) async throws {
+        guard case .attached = state else { return }
+        try await sendControlCommand(
+            "select-window -t \(windowId.shellEscaped())\n", type: .ignored)
+    }
+
+    /// Switch to a specific window and pane.
+    func selectWindowAndPane(windowId: String, paneId: String) async throws {
+        guard case .attached = state else { return }
+        try await sendControlCommand(
+            "select-window -t \(windowId.shellEscaped())\n", type: .ignored)
+        try await sendControlCommand(
+            "select-pane -t \(paneId.shellEscaped())\n", type: .ignored)
+    }
+
+    /// Rename the specified tmux session.
+    func renameSession(_ sessionName: String, to newName: String) async throws {
+        guard case .attached = state else { return }
+        try await sendControlCommand(
+            "rename-session -t \(sessionName.shellEscaped()) \(newName.shellEscaped())\n",
+            type: .ignored)
+        // Update local sessions array
+        if let index = sessions.firstIndex(where: { $0.name == sessionName }) {
+            sessions[index].name = newName
+        }
+        // Update state if we renamed the current session
+        if case .attached(let current) = state, current == sessionName {
+            state = .attached(sessionName: newName)
+        }
+    }
+
+    /// Kill the specified tmux session by name.
+    func killSession(_ sessionName: String) async throws {
+        guard case .attached = state else { return }
+        try await sendControlCommand(
+            "kill-session -t \(sessionName.shellEscaped())\n", type: .ignored)
+        sessions.removeAll { $0.name == sessionName }
+    }
+
+    /// Rename the specified window.
+    func renameWindow(_ windowId: String, to newName: String) async throws {
+        guard case .attached = state else { return }
+        try await sendControlCommand(
+            "rename-window -t \(windowId.shellEscaped()) \(newName.shellEscaped())\n",
+            type: .ignored)
+        if let index = currentWindows.firstIndex(where: { $0.id == windowId }) {
+            currentWindows[index].name = newName
         }
     }
 
@@ -858,6 +944,52 @@ final class ConnectionManager {
         logger.info("tmux version \(version) detected")
     }
 
+    // MARK: - Window State Helpers (internal for testability)
+
+    /// Handle a window close notification.
+    func handleWindowClose(_ windowId: String) {
+        logger.info("Window closed: \(windowId)")
+        currentWindows.removeAll { $0.id == windowId }
+        if activeWindowId == windowId {
+            activeWindowId = currentWindows.first(where: { $0.isActive })?.id
+                ?? currentWindows.first?.id
+        }
+    }
+
+    /// Handle a window rename notification.
+    func handleWindowRenamed(_ windowId: String, name: String) {
+        logger.info("Window renamed: \(windowId) → \(name)")
+        if let index = currentWindows.firstIndex(where: { $0.id == windowId }) {
+            currentWindows[index].name = name
+        }
+    }
+
+    /// Handle the list-windows command response.
+    func handleListWindowsResponse(_ response: String) {
+        let parsed = Self.parseWindowList(response)
+        if !parsed.isEmpty {
+            currentWindows = parsed
+            activeWindowId = parsed.first(where: { $0.isActive })?.id
+                ?? parsed.first?.id
+            updateWindowPaneMapping()
+        }
+    }
+
+    /// Request a window list refresh via the control channel.
+    private func requestWindowListRefresh() {
+        Task {
+            try? await sendControlCommand(
+                "list-windows -F '#{window_id}\t#{window_index}\t#{window_name}\t#{window_active}'\n",
+                type: .listWindows)
+        }
+    }
+
+    /// Associate pane IDs from currentPanes with their windows.
+    private func updateWindowPaneMapping() {
+        // currentPanes only contains panes for the currently visible window.
+        // Active window panes are updated in onLayoutChange.
+    }
+
     // MARK: - Callback Wiring
 
     /// Connect ``TmuxControlService`` callbacks to pane buffer management.
@@ -876,6 +1008,15 @@ final class ConnectionManager {
         tmuxService.onLayoutChange = { [weak self] windowId, panes in
             guard let self else { return }
             self.currentPanes = panes
+            self.activeWindowId = windowId
+            // Mark this window as active in currentWindows
+            for i in self.currentWindows.indices {
+                self.currentWindows[i].isActive = (self.currentWindows[i].id == windowId)
+            }
+            // Update pane IDs for this window
+            if let idx = self.currentWindows.firstIndex(where: { $0.id == windowId }) {
+                self.currentWindows[idx].paneIds = panes.map { "%\($0.paneId)" }
+            }
             // Create TerminalBuffer for any new panes.
             var newPaneIds: [String] = []
             for pane in panes {
@@ -927,6 +1068,22 @@ final class ConnectionManager {
                     }
                 }
             }
+        }
+
+        tmuxService.onWindowAdd = { [weak self] windowId in
+            guard let self else { return }
+            self.logger.info("Window added: \(windowId)")
+            self.requestWindowListRefresh()
+        }
+
+        tmuxService.onWindowClose = { [weak self] windowId in
+            guard let self else { return }
+            self.handleWindowClose(windowId)
+        }
+
+        tmuxService.onWindowRenamed = { [weak self] windowId, name in
+            guard let self else { return }
+            self.handleWindowRenamed(windowId, name: name)
         }
 
         tmuxService.onCommandResponse = { [weak self] response in
@@ -996,6 +1153,8 @@ final class ConnectionManager {
                     ))
                 }
                 Task { try? await self.switchSession(to: name) }
+            case .listWindows:
+                self.handleListWindowsResponse(response)
             case .ignored:
                 break
             }
@@ -1014,6 +1173,8 @@ final class ConnectionManager {
             self.activePaneId = nil
             self.scrolledBackPanes = []
             self.paneHasNewOutput = []
+            self.currentWindows = []
+            self.activeWindowId = nil
             // Save as last-used session.
             if let serverID = self.currentServer?.id.uuidString {
                 self.lastSessionStore.save(sessionName: name, forServerID: serverID)
@@ -1026,6 +1187,7 @@ final class ConnectionManager {
                 let size = (cols > 0 && rows > 0) ? "\(cols),\(rows)" : "80,24"
                 try? await self.sendControlCommand(
                     "refresh-client -C \(size)\n", type: .ignored)
+                self.requestWindowListRefresh()
             }
         }
 
@@ -1050,6 +1212,23 @@ final class ConnectionManager {
             // Log error but don't disconnect -- tmux errors can be non-fatal.
             self?.logger.error("TmuxControl error: \(message)")
         }
+    }
+
+    // MARK: - Window List Parsing
+
+    /// Parse the output of `list-windows -F '#{window_id}\t#{window_index}\t#{window_name}\t#{window_active}'`.
+    static func parseWindowList(_ output: String) -> [TmuxWindowInfo] {
+        output.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "\n")
+            .compactMap { line in
+                let parts = line.trimmingCharacters(in: .whitespaces)
+                    .split(separator: "\t", maxSplits: 3)
+                guard parts.count >= 4 else { return nil }
+                let id = String(parts[0])
+                let name = String(parts[2])
+                let isActive = parts[3] == "1"
+                return TmuxWindowInfo(id: id, name: name, paneIds: [], isActive: isActive)
+            }
     }
 
     /// Re-query the remote server for the current list of tmux sessions

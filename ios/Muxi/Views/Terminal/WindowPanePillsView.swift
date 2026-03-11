@@ -91,6 +91,7 @@ struct WindowPanePillsView: View {
                     }
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .background(MuxiTokens.Colors.surfaceElevated)
         .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.md))
         .overlay(

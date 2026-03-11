@@ -162,6 +162,30 @@ static int parse_window_close(const char *rest, TmuxMessage *msg) {
 }
 
 /**
+ * Parse %window-renamed @<id> <new_name>
+ */
+static int parse_window_renamed(const char *rest, TmuxMessage *msg) {
+    char tok[TMUX_ID_MAX];
+    if (!next_token(&rest, tok, sizeof(tok)))
+        return TMUX_MSG_UNKNOWN;
+    safe_strcpy(msg->window_id, TMUX_ID_MAX, tok);
+    const char *p = skip_space(rest);
+    safe_strcpy(msg->window_name, TMUX_NAME_MAX, p);
+    return TMUX_MSG_WINDOW_RENAMED;
+}
+
+/**
+ * Parse %unlinked-window-close @<id>
+ */
+static int parse_unlinked_window_close(const char *rest, TmuxMessage *msg) {
+    char tok[TMUX_ID_MAX];
+    if (!next_token(&rest, tok, sizeof(tok)))
+        return TMUX_MSG_UNKNOWN;
+    safe_strcpy(msg->window_id, TMUX_ID_MAX, tok);
+    return TMUX_MSG_UNLINKED_WINDOW_CLOSE;
+}
+
+/**
  * Parse %session-changed $<id> <name>
  */
 static int parse_session_changed(const char *rest, TmuxMessage *msg) {
@@ -270,8 +294,10 @@ static const keyword_entry_t keyword_table[] = {
     KW_ENTRY("%output",           parse_output),
     KW_ENTRY("%layout-change",    parse_layout_change),
     KW_ENTRY("%window-add",       parse_window_add),
-    KW_ENTRY("%window-close",     parse_window_close),
-    KW_ENTRY("%session-changed",  parse_session_changed),
+    KW_ENTRY("%window-close",          parse_window_close),
+    KW_ENTRY("%window-renamed",        parse_window_renamed),
+    KW_ENTRY("%unlinked-window-close", parse_unlinked_window_close),
+    KW_ENTRY("%session-changed",       parse_session_changed),
     KW_ENTRY("%sessions-changed", parse_sessions_changed),
     KW_ENTRY("%begin",            parse_begin),
     KW_ENTRY("%end",              parse_end),

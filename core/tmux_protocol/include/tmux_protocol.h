@@ -24,7 +24,9 @@
 #define TMUX_MSG_END              7
 #define TMUX_MSG_EXIT             8
 #define TMUX_MSG_ERROR            9
-#define TMUX_MSG_SESSIONS_CHANGED 10
+#define TMUX_MSG_SESSIONS_CHANGED      10
+#define TMUX_MSG_WINDOW_RENAMED        11
+#define TMUX_MSG_UNLINKED_WINDOW_CLOSE 12
 
 /* ---------- Buffer size constants ---------- */
 #define TMUX_ID_MAX    32
@@ -47,6 +49,7 @@ typedef struct {
     char window_id[TMUX_ID_MAX];      /* "@0", "@1", ... */
     char session_id[TMUX_ID_MAX];     /* "$0", "$1", ... */
     char session_name[TMUX_NAME_MAX];
+    char window_name[TMUX_NAME_MAX];
 
     const char *layout;               /* points into original line */
     size_t layout_len;

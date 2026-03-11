@@ -1,0 +1,144 @@
+import SwiftUI
+
+/// Bottom toolbar above the extended keyboard.
+///
+/// Layout: `⊞ │ [pills] │ + ⌨`
+///
+/// `⊞` (square.stack) toggles session mode. In session mode, changes to `✕` (xmark).
+/// Pills show window/pane capsules (normal) or session pills (session mode).
+/// `+` shows context-dependent creation menu.
+/// `⌨` toggles system keyboard.
+struct ToolbarView: View {
+    let connectionManager: ConnectionManager
+    let sessionName: String
+    @Binding var isKeyboardActive: Bool
+    @Binding var isSessionMode: Bool
+
+    // Rename alert state
+    @Binding var showRenameAlert: Bool
+    @Binding var renameTarget: RenameTarget?
+    @Binding var renameText: String
+
+    /// What we're renaming.
+    enum RenameTarget: Equatable {
+        case window(id: String)
+        case session(name: String)
+    }
+
+    // Callbacks for tmux commands
+    var onSendCommand: ((String) -> Void)?
+    var onSelectWindow: ((String) -> Void)?
+    var onSelectWindowAndPane: ((String, String) -> Void)?
+    var onNewSession: (() -> Void)?
+    var onSwitchSession: ((String) -> Void)?
+    var onKillSession: ((String) -> Void)?
+
+    var body: some View {
+        HStack(spacing: MuxiTokens.Spacing.sm) {
+            // Session mode toggle
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isSessionMode.toggle()
+                }
+            } label: {
+                Image(systemName: isSessionMode ? "xmark" : "square.stack")
+                    .font(MuxiTokens.Typography.body)
+                    .foregroundStyle(MuxiTokens.Colors.accentDefault)
+                    .frame(width: 32, height: 32)
+            }
+
+            // Separator
+            Rectangle()
+                .fill(MuxiTokens.Colors.borderDefault)
+                .frame(width: 1, height: 24)
+
+            // Pill area (fills remaining space)
+            Group {
+                if isSessionMode {
+                    SessionPillsView(
+                        sessions: connectionManager.sessions,
+                        activeSessionName: sessionName,
+                        onSelectSession: { name in
+                            onSwitchSession?(name)
+                            isSessionMode = false
+                        },
+                        onRenameSession: { name in
+                            renameTarget = .session(name: name)
+                            renameText = name
+                            showRenameAlert = true
+                        },
+                        onCloseSession: { name in
+                            onKillSession?(name)
+                        }
+                    )
+                } else {
+                    WindowPanePillsView(
+                        windows: connectionManager.currentWindows,
+                        activeWindowId: connectionManager.activeWindowId,
+                        activePaneId: connectionManager.activePaneId,
+                        currentPanes: connectionManager.currentPanes,
+                        onSelectWindow: { windowId in
+                            onSelectWindow?(windowId)
+                        },
+                        onSelectWindowAndPane: { windowId, paneId in
+                            onSelectWindowAndPane?(windowId, paneId)
+                        },
+                        onRenameWindow: { windowId in
+                            let currentName = connectionManager.currentWindows
+                                .first(where: { $0.id == windowId })?.name ?? ""
+                            renameTarget = .window(id: windowId)
+                            renameText = currentName
+                            showRenameAlert = true
+                        },
+                        onCloseWindow: { windowId in
+                            onSendCommand?("kill-window -t \(windowId.shellEscaped())")
+                        },
+                        onZoomPane: {
+                            onSendCommand?("resize-pane -Z")
+                        },
+                        onClosePane: { paneId in
+                            onSendCommand?("kill-pane -t \(paneId.shellEscaped())")
+                        }
+                    )
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Separator
+            Rectangle()
+                .fill(MuxiTokens.Colors.borderDefault)
+                .frame(width: 1, height: 24)
+
+            // + menu
+            PlusMenuView(
+                isSessionMode: isSessionMode,
+                onNewWindow: {
+                    onSendCommand?("new-window")
+                },
+                onSplitHorizontal: {
+                    onSendCommand?("split-window -h")
+                },
+                onSplitVertical: {
+                    onSendCommand?("split-window -v")
+                },
+                onNewSession: {
+                    onNewSession?()
+                }
+            )
+
+            // Keyboard toggle
+            Button {
+                isKeyboardActive.toggle()
+            } label: {
+                Image(systemName: isKeyboardActive
+                    ? "keyboard.chevron.compact.down"
+                    : "keyboard")
+                    .font(MuxiTokens.Typography.body)
+                    .foregroundStyle(MuxiTokens.Colors.accentDefault)
+            }
+        }
+        .padding(.horizontal, MuxiTokens.Spacing.lg)
+        .padding(.vertical, MuxiTokens.Spacing.sm)
+        .background(MuxiTokens.Colors.surfaceDefault)
+    }
+}

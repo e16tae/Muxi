@@ -39,4 +39,42 @@ final class WindowTrackingTests: XCTestCase {
         let windows = ConnectionManager.parseWindowList(output)
         XCTAssertTrue(windows.isEmpty)
     }
+
+    // MARK: - Window State Management
+
+    func testWindowCloseRemovesFromArray() {
+        let manager = makeManager()
+        manager.currentWindows = [
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ]
+        manager.activeWindowId = "@0"
+
+        manager.handleWindowClose("@0")
+
+        XCTAssertEqual(manager.currentWindows.count, 1)
+        XCTAssertEqual(manager.currentWindows[0].id, "@1")
+        XCTAssertEqual(manager.activeWindowId, "@1")
+    }
+
+    func testWindowRenameUpdatesName() {
+        let manager = makeManager()
+        manager.currentWindows = [
+            .init(id: "@0", name: "bash", paneIds: [], isActive: true),
+        ]
+
+        manager.handleWindowRenamed("@0", name: "zsh")
+
+        XCTAssertEqual(manager.currentWindows[0].name, "zsh")
+    }
+
+    func testListWindowsResponsePopulatesWindows() {
+        let manager = makeManager()
+        let response = "@0\t0\tbash\t1\n@1\t1\tvim\t0"
+
+        manager.handleListWindowsResponse(response)
+
+        XCTAssertEqual(manager.currentWindows.count, 2)
+        XCTAssertEqual(manager.activeWindowId, "@0")
+    }
 }

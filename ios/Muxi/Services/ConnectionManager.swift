@@ -76,10 +76,10 @@ final class ConnectionManager {
     var activePaneId: String?
 
     /// Windows in the current session, tracked via tmux notifications.
-    private(set) var currentWindows: [TmuxWindowInfo] = []
+    var currentWindows: [TmuxWindowInfo] = []
 
     /// The currently active window ID (e.g., "@0").
-    private(set) var activeWindowId: String?
+    var activeWindowId: String?
 
     /// The SSH service (exposed for actor-routed channel writes).
     private var sshServiceForWrites: SSHServiceProtocol { sshService }
@@ -558,6 +558,9 @@ final class ConnectionManager {
         try await sendControlCommand(
             "set-option -g detach-on-destroy off\n", type: .ignored)
 
+        // Request window list so the toolbar can show window pills.
+        requestWindowListRefresh()
+
         sshMonitorTask?.cancel()
         sshMonitorTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -878,6 +881,52 @@ final class ConnectionManager {
         logger.info("tmux version \(version) detected")
     }
 
+    // MARK: - Window State Helpers (internal for testability)
+
+    /// Handle a window close notification.
+    func handleWindowClose(_ windowId: String) {
+        logger.info("Window closed: \(windowId)")
+        currentWindows.removeAll { $0.id == windowId }
+        if activeWindowId == windowId {
+            activeWindowId = currentWindows.first(where: { $0.isActive })?.id
+                ?? currentWindows.first?.id
+        }
+    }
+
+    /// Handle a window rename notification.
+    func handleWindowRenamed(_ windowId: String, name: String) {
+        logger.info("Window renamed: \(windowId) → \(name)")
+        if let index = currentWindows.firstIndex(where: { $0.id == windowId }) {
+            currentWindows[index].name = name
+        }
+    }
+
+    /// Handle the list-windows command response.
+    func handleListWindowsResponse(_ response: String) {
+        let parsed = Self.parseWindowList(response)
+        if !parsed.isEmpty {
+            currentWindows = parsed
+            activeWindowId = parsed.first(where: { $0.isActive })?.id
+                ?? parsed.first?.id
+            updateWindowPaneMapping()
+        }
+    }
+
+    /// Request a window list refresh via the control channel.
+    private func requestWindowListRefresh() {
+        Task {
+            try? await sendControlCommand(
+                "list-windows -F '#{window_id}\t#{window_index}\t#{window_name}\t#{window_active}'\n",
+                type: .listWindows)
+        }
+    }
+
+    /// Associate pane IDs from currentPanes with their windows.
+    private func updateWindowPaneMapping() {
+        // currentPanes only contains panes for the currently visible window.
+        // Active window panes are updated in onLayoutChange.
+    }
+
     // MARK: - Callback Wiring
 
     /// Connect ``TmuxControlService`` callbacks to pane buffer management.
@@ -896,6 +945,15 @@ final class ConnectionManager {
         tmuxService.onLayoutChange = { [weak self] windowId, panes in
             guard let self else { return }
             self.currentPanes = panes
+            self.activeWindowId = windowId
+            // Mark this window as active in currentWindows
+            for i in self.currentWindows.indices {
+                self.currentWindows[i].isActive = (self.currentWindows[i].id == windowId)
+            }
+            // Update pane IDs for this window
+            if let idx = self.currentWindows.firstIndex(where: { $0.id == windowId }) {
+                self.currentWindows[idx].paneIds = panes.map { "%\($0.paneId)" }
+            }
             // Create TerminalBuffer for any new panes.
             var newPaneIds: [String] = []
             for pane in panes {
@@ -947,6 +1005,22 @@ final class ConnectionManager {
                     }
                 }
             }
+        }
+
+        tmuxService.onWindowAdd = { [weak self] windowId in
+            guard let self else { return }
+            self.logger.info("Window added: \(windowId)")
+            self.requestWindowListRefresh()
+        }
+
+        tmuxService.onWindowClose = { [weak self] windowId in
+            guard let self else { return }
+            self.handleWindowClose(windowId)
+        }
+
+        tmuxService.onWindowRenamed = { [weak self] windowId, name in
+            guard let self else { return }
+            self.handleWindowRenamed(windowId, name: name)
         }
 
         tmuxService.onCommandResponse = { [weak self] response in
@@ -1017,11 +1091,7 @@ final class ConnectionManager {
                 }
                 Task { try? await self.switchSession(to: name) }
             case .listWindows:
-                let parsed = Self.parseWindowList(response)
-                if !parsed.isEmpty || self.currentWindows.isEmpty {
-                    self.currentWindows = parsed
-                    self.activeWindowId = parsed.first(where: \.isActive)?.id
-                }
+                self.handleListWindowsResponse(response)
             case .ignored:
                 break
             }
@@ -1040,6 +1110,8 @@ final class ConnectionManager {
             self.activePaneId = nil
             self.scrolledBackPanes = []
             self.paneHasNewOutput = []
+            self.currentWindows = []
+            self.activeWindowId = nil
             // Save as last-used session.
             if let serverID = self.currentServer?.id.uuidString {
                 self.lastSessionStore.save(sessionName: name, forServerID: serverID)
@@ -1052,6 +1124,7 @@ final class ConnectionManager {
                 let size = (cols > 0 && rows > 0) ? "\(cols),\(rows)" : "80,24"
                 try? await self.sendControlCommand(
                     "refresh-client -C \(size)\n", type: .ignored)
+                self.requestWindowListRefresh()
             }
         }
 

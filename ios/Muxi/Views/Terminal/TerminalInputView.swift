@@ -163,13 +163,6 @@ struct TerminalInputView: UIViewRepresentable {
     var onRawData: ((Data) -> Void)?
     @Binding var isActive: Bool
 
-    // Extended keyboard params kept for API compatibility but no longer
-    // used as inputAccessoryView — ExtendedKeyboardView is now placed
-    // explicitly in the TerminalSessionView VStack.
-    var theme: Theme?
-    var inputHandler: InputHandler?
-    var onExtendedInput: ((Data) -> Void)?
-
     func makeCoordinator() -> Coordinator {
         Coordinator(isActive: $isActive)
     }

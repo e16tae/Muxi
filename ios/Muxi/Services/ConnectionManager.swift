@@ -62,6 +62,11 @@ final class ConnectionManager {
     func setSessionsForTesting(_ newSessions: [TmuxSession]) {
         sessions = newSessions
     }
+
+    func setWindowsForTesting(_ windows: [TmuxWindowInfo], activeId: String? = nil) {
+        currentWindows = windows
+        activeWindowId = activeId
+    }
     #endif
 
     /// The server we are currently connected (or connecting) to.
@@ -81,10 +86,10 @@ final class ConnectionManager {
     var activePaneId: String?
 
     /// Windows in the current session, tracked via tmux notifications.
-    var currentWindows: [TmuxWindowInfo] = []
+    private(set) var currentWindows: [TmuxWindowInfo] = []
 
     /// The currently active window ID (e.g., "@0").
-    var activeWindowId: String?
+    private(set) var activeWindowId: String?
 
     /// The SSH service (exposed for actor-routed channel writes).
     private var sshServiceForWrites: SSHServiceProtocol { sshService }

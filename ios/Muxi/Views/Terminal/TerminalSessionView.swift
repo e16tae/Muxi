@@ -163,12 +163,7 @@ struct TerminalSessionView: View {
                 onRawData: { data in
                     sendToActivePane(data)
                 },
-                isActive: $isKeyboardActive,
-                theme: themeManager.currentTheme,
-                inputHandler: inputHandler,
-                onExtendedInput: { data in
-                    sendToActivePane(data)
-                }
+                isActive: $isKeyboardActive
             )
             .frame(width: 1, height: 1)
             .opacity(0)

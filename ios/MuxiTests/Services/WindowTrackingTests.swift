@@ -52,11 +52,10 @@ final class WindowTrackingTests: XCTestCase {
 
     func testWindowCloseRemovesFromArray() {
         let manager = makeManager()
-        manager.currentWindows = [
+        manager.setWindowsForTesting([
             .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
             .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
-        ]
-        manager.activeWindowId = "@0"
+        ], activeId: "@0")
 
         manager.handleWindowClose("@0")
 
@@ -67,9 +66,9 @@ final class WindowTrackingTests: XCTestCase {
 
     func testWindowRenameUpdatesName() {
         let manager = makeManager()
-        manager.currentWindows = [
+        manager.setWindowsForTesting([
             .init(id: "@0", name: "bash", paneIds: [], isActive: true),
-        ]
+        ])
 
         manager.handleWindowRenamed("@0", name: "zsh")
 
@@ -122,9 +121,9 @@ final class WindowTrackingTests: XCTestCase {
 
     func testRenameWindowUpdatesLocalState() async throws {
         let manager = makeConnectedManager()
-        manager.currentWindows = [
+        manager.setWindowsForTesting([
             .init(id: "@0", name: "bash", paneIds: [], isActive: true),
-        ]
+        ])
         manager.setStateForTesting(.attached(sessionName: "work"))
 
         try await manager.renameWindow("@0", to: "zsh")

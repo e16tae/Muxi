@@ -8,6 +8,14 @@ final class WindowTrackingTests: XCTestCase {
         ConnectionManager(sshService: MockSSHService())
     }
 
+    /// Create a manager with a connected mock SSH service (for testing
+    /// methods that write to the control channel).
+    private func makeConnectedManager() -> ConnectionManager {
+        let mock = MockSSHService()
+        mock.state = .connected
+        return ConnectionManager(sshService: mock)
+    }
+
     // MARK: - Window List Parsing
 
     func testParseWindowList() {
@@ -76,5 +84,62 @@ final class WindowTrackingTests: XCTestCase {
 
         XCTAssertEqual(manager.currentWindows.count, 2)
         XCTAssertEqual(manager.activeWindowId, "@0")
+    }
+
+    // MARK: - Session/Window Command Tests
+
+    func testRenameSessionUpdatesLocalState() async throws {
+        let manager = makeConnectedManager()
+        manager.setSessionsForTesting([
+            TmuxSession(id: "$0", name: "work", windows: [], createdAt: Date(), lastActivity: Date()),
+            TmuxSession(id: "$1", name: "dev", windows: [], createdAt: Date(), lastActivity: Date()),
+        ])
+        manager.setStateForTesting(.attached(sessionName: "work"))
+
+        try await manager.renameSession("work", to: "office")
+
+        XCTAssertEqual(manager.sessions[0].name, "office")
+        if case .attached(let name) = manager.state {
+            XCTAssertEqual(name, "office")
+        } else {
+            XCTFail("Expected .attached state")
+        }
+    }
+
+    func testKillSessionRemovesFromArray() async throws {
+        let manager = makeConnectedManager()
+        manager.setSessionsForTesting([
+            TmuxSession(id: "$0", name: "work", windows: [], createdAt: Date(), lastActivity: Date()),
+            TmuxSession(id: "$1", name: "dev", windows: [], createdAt: Date(), lastActivity: Date()),
+        ])
+        manager.setStateForTesting(.attached(sessionName: "work"))
+
+        try await manager.killSession("dev")
+
+        XCTAssertEqual(manager.sessions.count, 1)
+        XCTAssertEqual(manager.sessions[0].name, "work")
+    }
+
+    func testRenameWindowUpdatesLocalState() async throws {
+        let manager = makeConnectedManager()
+        manager.currentWindows = [
+            .init(id: "@0", name: "bash", paneIds: [], isActive: true),
+        ]
+        manager.setStateForTesting(.attached(sessionName: "work"))
+
+        try await manager.renameWindow("@0", to: "zsh")
+
+        XCTAssertEqual(manager.currentWindows[0].name, "zsh")
+    }
+
+    func testSelectWindowRequiresAttachedState() async throws {
+        let manager = makeManager()
+        // Not attached — should return without error
+        try await manager.selectWindow("@0")
+    }
+
+    func testSelectWindowAndPaneRequiresAttachedState() async throws {
+        let manager = makeManager()
+        try await manager.selectWindowAndPane(windowId: "@0", paneId: "%0")
     }
 }

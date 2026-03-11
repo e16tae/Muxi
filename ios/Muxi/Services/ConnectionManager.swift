@@ -57,6 +57,11 @@ final class ConnectionManager {
     func simulateOnExit() {
         tmuxService.onExit?()
     }
+
+    /// Test-only: override the sessions array for unit tests.
+    func setSessionsForTesting(_ newSessions: [TmuxSession]) {
+        sessions = newSessions
+    }
     #endif
 
     /// The server we are currently connected (or connecting) to.
@@ -650,6 +655,59 @@ final class ConnectionManager {
             logger.info("Creating new session with tmux default name")
             try await sendControlCommand(
                 "new-session -d -P -F '#{session_name}'\n", type: .createSession)
+        }
+    }
+
+    // MARK: - Window/Session Commands
+
+    /// Switch to a specific window by ID.
+    func selectWindow(_ windowId: String) async throws {
+        guard case .attached = state else { return }
+        try await sendControlCommand(
+            "select-window -t \(windowId.shellEscaped())\n", type: .ignored)
+    }
+
+    /// Switch to a specific window and pane.
+    func selectWindowAndPane(windowId: String, paneId: String) async throws {
+        guard case .attached = state else { return }
+        try await sendControlCommand(
+            "select-window -t \(windowId.shellEscaped())\n", type: .ignored)
+        try await sendControlCommand(
+            "select-pane -t \(paneId.shellEscaped())\n", type: .ignored)
+    }
+
+    /// Rename the specified tmux session.
+    func renameSession(_ sessionName: String, to newName: String) async throws {
+        guard case .attached = state else { return }
+        try await sendControlCommand(
+            "rename-session -t \(sessionName.shellEscaped()) \(newName.shellEscaped())\n",
+            type: .ignored)
+        // Update local sessions array
+        if let index = sessions.firstIndex(where: { $0.name == sessionName }) {
+            sessions[index].name = newName
+        }
+        // Update state if we renamed the current session
+        if case .attached(let current) = state, current == sessionName {
+            state = .attached(sessionName: newName)
+        }
+    }
+
+    /// Kill the specified tmux session by name.
+    func killSession(_ sessionName: String) async throws {
+        guard case .attached = state else { return }
+        try await sendControlCommand(
+            "kill-session -t \(sessionName.shellEscaped())\n", type: .ignored)
+        sessions.removeAll { $0.name == sessionName }
+    }
+
+    /// Rename the specified window.
+    func renameWindow(_ windowId: String, to newName: String) async throws {
+        guard case .attached = state else { return }
+        try await sendControlCommand(
+            "rename-window -t \(windowId.shellEscaped()) \(newName.shellEscaped())\n",
+            type: .ignored)
+        if let index = currentWindows.firstIndex(where: { $0.id == windowId }) {
+            currentWindows[index].name = newName
         }
     }
 

@@ -72,34 +72,45 @@ struct ToolbarView: View {
                         }
                     )
                 } else {
-                    WindowPanePillsView(
-                        windows: connectionManager.currentWindows,
-                        activeWindowId: connectionManager.activeWindowId,
-                        activePaneId: connectionManager.activePaneId,
-                        currentPanes: connectionManager.currentPanes,
-                        onSelectWindow: { windowId in
-                            onSelectWindow?(windowId)
-                        },
-                        onSelectWindowAndPane: { windowId, paneId in
-                            onSelectWindowAndPane?(windowId, paneId)
-                        },
-                        onRenameWindow: { windowId in
-                            let currentName = connectionManager.currentWindows
-                                .first(where: { $0.id == windowId })?.name ?? ""
-                            renameTarget = .window(id: windowId)
-                            renameText = currentName
-                            showRenameAlert = true
-                        },
-                        onCloseWindow: { windowId in
-                            onSendCommand?("kill-window -t \(windowId.shellEscaped())")
-                        },
-                        onZoomPane: {
-                            onSendCommand?("resize-pane -Z")
-                        },
-                        onClosePane: { paneId in
-                            onSendCommand?("kill-pane -t \(paneId.shellEscaped())")
-                        }
-                    )
+                    if connectionManager.currentWindows.isEmpty {
+                        // Fallback before window list arrives
+                        Text(sessionName)
+                            .font(MuxiTokens.Typography.label).fontWeight(.semibold)
+                            .foregroundStyle(MuxiTokens.Colors.textPrimary)
+                            .padding(.horizontal, MuxiTokens.Spacing.md)
+                            .padding(.vertical, MuxiTokens.Spacing.xs)
+                            .background(MuxiTokens.Colors.surfaceElevated)
+                            .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.md))
+                    } else {
+                        WindowPanePillsView(
+                            windows: connectionManager.currentWindows,
+                            activeWindowId: connectionManager.activeWindowId,
+                            activePaneId: connectionManager.activePaneId,
+                            currentPanes: connectionManager.currentPanes,
+                            onSelectWindow: { windowId in
+                                onSelectWindow?(windowId)
+                            },
+                            onSelectWindowAndPane: { windowId, paneId in
+                                onSelectWindowAndPane?(windowId, paneId)
+                            },
+                            onRenameWindow: { windowId in
+                                let currentName = connectionManager.currentWindows
+                                    .first(where: { $0.id == windowId })?.name ?? ""
+                                renameTarget = .window(id: windowId)
+                                renameText = currentName
+                                showRenameAlert = true
+                            },
+                            onCloseWindow: { windowId in
+                                onSendCommand?("kill-window -t \(windowId.shellEscaped())")
+                            },
+                            onZoomPane: {
+                                onSendCommand?("resize-pane -Z")
+                            },
+                            onClosePane: { paneId in
+                                onSendCommand?("kill-pane -t \(paneId.shellEscaped())")
+                            }
+                        )
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

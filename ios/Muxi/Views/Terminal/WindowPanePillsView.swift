@@ -38,25 +38,24 @@ struct WindowPanePillsView: View {
 
         HStack(spacing: 0) {
             // Window name segment
-            Text(window.name)
-                .font(MuxiTokens.Typography.label).fontWeight(.semibold)
-                .foregroundStyle(isActiveWindow
-                    ? MuxiTokens.Colors.textPrimary
-                    : MuxiTokens.Colors.textTertiary)
-                .padding(.horizontal, MuxiTokens.Spacing.sm)
-                .padding(.vertical, MuxiTokens.Spacing.xs)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onSelectWindow?(window.id)
+            Menu {
+                Button("Rename Window") {
+                    onRenameWindow?(window.id)
                 }
-                .contextMenu {
-                    Button("Rename Window") {
-                        onRenameWindow?(window.id)
-                    }
-                    Button("Close Window", role: .destructive) {
-                        onCloseWindow?(window.id)
-                    }
+                Button("Close Window", role: .destructive) {
+                    onCloseWindow?(window.id)
                 }
+            } label: {
+                Text(window.name)
+                    .font(MuxiTokens.Typography.label).fontWeight(.semibold)
+                    .foregroundStyle(isActiveWindow
+                        ? MuxiTokens.Colors.textPrimary
+                        : MuxiTokens.Colors.textTertiary)
+                    .padding(.horizontal, MuxiTokens.Spacing.sm)
+                    .padding(.vertical, MuxiTokens.Spacing.xs)
+            } primaryAction: {
+                onSelectWindow?(window.id)
+            }
 
             // Pane segments
             let paneIds = panesToShow(for: window)
@@ -67,28 +66,27 @@ struct WindowPanePillsView: View {
                     .fill(MuxiTokens.Colors.borderDefault)
                     .frame(width: 1)
 
-                Text("\(index)")
-                    .font(MuxiTokens.Typography.label).fontWeight(.semibold)
-                    .foregroundStyle(isActivePane
-                        ? MuxiTokens.Colors.textInverse
-                        : MuxiTokens.Colors.textTertiary)
-                    .padding(.horizontal, MuxiTokens.Spacing.sm)
-                    .padding(.vertical, MuxiTokens.Spacing.xs)
-                    .background(isActivePane
-                        ? MuxiTokens.Colors.accentDefault
-                        : Color.clear)
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        onSelectWindowAndPane?(window.id, paneId)
+                Menu {
+                    Button("Zoom") {
+                        onZoomPane?()
                     }
-                    .contextMenu {
-                        Button("Zoom") {
-                            onZoomPane?()
-                        }
-                        Button("Close Pane", role: .destructive) {
-                            onClosePane?(paneId)
-                        }
+                    Button("Close Pane", role: .destructive) {
+                        onClosePane?(paneId)
                     }
+                } label: {
+                    Text("\(index)")
+                        .font(MuxiTokens.Typography.label).fontWeight(.semibold)
+                        .foregroundStyle(isActivePane
+                            ? MuxiTokens.Colors.textInverse
+                            : MuxiTokens.Colors.textTertiary)
+                        .padding(.horizontal, MuxiTokens.Spacing.sm)
+                        .padding(.vertical, MuxiTokens.Spacing.xs)
+                        .background(isActivePane
+                            ? MuxiTokens.Colors.accentDefault
+                            : Color.clear)
+                } primaryAction: {
+                    onSelectWindowAndPane?(window.id, paneId)
+                }
             }
         }
         .fixedSize(horizontal: false, vertical: true)

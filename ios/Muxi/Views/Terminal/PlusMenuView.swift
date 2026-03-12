@@ -18,23 +18,23 @@ struct PlusMenuView: View {
                 Button {
                     onNewSession?()
                 } label: {
-                    Text("New Session")
+                    Label("New Session", systemImage: "plus.rectangle")
                 }
             } else {
                 Button {
                     onNewWindow?()
                 } label: {
-                    Text("New Window")
+                    Label("New Window", systemImage: "macwindow.badge.plus")
                 }
                 Button {
                     onSplitHorizontal?()
                 } label: {
-                    Text("Split Horizontal")
+                    Label("Split Horizontal", systemImage: "rectangle.split.1x2")
                 }
                 Button {
                     onSplitVertical?()
                 } label: {
-                    Text("Split Vertical")
+                    Label("Split Vertical", systemImage: "rectangle.split.2x1")
                 }
             }
         } label: {

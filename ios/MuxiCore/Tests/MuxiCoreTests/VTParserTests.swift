@@ -757,3 +757,21 @@ import CVTParser
     #expect(cellCont.character == 0)
     #expect(cellCont.width == 0)
 }
+
+// MARK: - Cursor Visibility Tests
+
+@Test func testCursorVisibleByDefault() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    #expect(parser.cursor_visible == 1)
+}
+
+@Test func testCursorStyleDefaultBlock() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    #expect(parser.cursor_style == 0)
+}

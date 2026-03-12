@@ -352,6 +352,8 @@ void vt_parser_init(VTParserState *parser, int32_t cols, int32_t rows) {
     parser->rows = rows;
     parser->scroll_top = 0;
     parser->scroll_bottom = rows - 1;
+    parser->cursor_visible = 1;
+    parser->cursor_style = 0;
     parser->buffer = (VTCell *)calloc((size_t)cols * (size_t)rows, sizeof(VTCell));
     if (!parser->buffer) {
         parser->cols = 0;

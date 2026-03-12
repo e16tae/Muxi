@@ -58,6 +58,15 @@ typedef struct {
     int32_t  scroll_top;
     int32_t  scroll_bottom;
 
+    // Cursor state
+    int32_t  cursor_visible; // 1 = visible (default), 0 = hidden (DECTCEM)
+    int32_t  cursor_style;   // DECSCUSR: 0=blinking block, 1=blinking block,
+                             // 2=steady block, 3=blinking underline,
+                             // 4=steady underline, 5=blinking bar, 6=steady bar
+
+    // CSI intermediate byte (e.g. SP in "CSI Ps SP q")
+    int32_t  csi_intermediate;
+
     // UTF-8 accumulation
     uint8_t  utf8_buf[4];
     int32_t  utf8_len;

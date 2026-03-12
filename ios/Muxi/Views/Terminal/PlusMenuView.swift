@@ -41,6 +41,8 @@ struct PlusMenuView: View {
             Image(systemName: "plus")
                 .font(MuxiTokens.Typography.body)
                 .foregroundStyle(MuxiTokens.Colors.accentDefault)
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
         }
     }
 }

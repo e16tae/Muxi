@@ -101,17 +101,17 @@ struct WindowPanePillsView: View {
         )
     }
 
-    /// Get pane IDs for a window, falling back to currentPanes for the active window.
-    /// For non-active windows without pane info, returns empty (pill shows name only).
+    /// Get pane IDs for a window.
+    /// Normally populated by `list-panes -a` response. Falls back to
+    /// ``currentPanes`` for the active window during the brief interval
+    /// between `list-windows` and `list-panes` responses.
     private func panesToShow(for window: ConnectionManager.TmuxWindowInfo) -> [String] {
         if !window.paneIds.isEmpty {
             return window.paneIds
         }
-        // For active window, use currentPanes as fallback
         if window.id == activeWindowId {
             return currentPanes.map { "%\($0.paneId)" }
         }
-        // Non-active windows: no pane info available, show name only
         return []
     }
 }

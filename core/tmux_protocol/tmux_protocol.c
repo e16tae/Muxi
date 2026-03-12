@@ -276,6 +276,20 @@ static int parse_sessions_changed(const char *rest, TmuxMessage *msg) {
 }
 
 /**
+ * Parse %window-pane-changed @<window_id> %<pane_id>
+ */
+static int parse_window_pane_changed(const char *rest, TmuxMessage *msg) {
+    char tok[TMUX_ID_MAX];
+    if (!next_token(&rest, tok, sizeof(tok)))
+        return TMUX_MSG_UNKNOWN;
+    safe_strcpy(msg->window_id, TMUX_ID_MAX, tok);
+    if (!next_token(&rest, tok, sizeof(tok)))
+        return TMUX_MSG_UNKNOWN;
+    safe_strcpy(msg->pane_id, TMUX_ID_MAX, tok);
+    return TMUX_MSG_WINDOW_PANE_CHANGED;
+}
+
+/**
  * Parse %error <message>
  */
 static int parse_error(const char *rest, TmuxMessage *msg) {
@@ -302,6 +316,7 @@ static const keyword_entry_t keyword_table[] = {
     KW_ENTRY("%window-renamed",        parse_window_renamed),
     KW_ENTRY("%unlinked-window-close", parse_unlinked_window_close),
     KW_ENTRY("%session-changed",       parse_session_changed),
+    KW_ENTRY("%window-pane-changed",   parse_window_pane_changed),
     KW_ENTRY("%sessions-changed", parse_sessions_changed),
     KW_ENTRY("%begin",            parse_begin),
     KW_ENTRY("%end",              parse_end),

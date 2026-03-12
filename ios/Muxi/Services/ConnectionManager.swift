@@ -1205,6 +1205,13 @@ final class ConnectionManager {
             }
         }
 
+        tmuxService.onWindowPaneChanged = { [weak self] windowId, paneId in
+            guard let self else { return }
+            // Only update if the event is for the active window.
+            guard windowId == self.activeWindowId else { return }
+            self.activePaneId = paneId
+        }
+
         tmuxService.onWindowAdd = { [weak self] windowId in
             guard let self else { return }
             self.logger.info("Window added: \(windowId)")

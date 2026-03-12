@@ -68,6 +68,10 @@ final class ConnectionManager {
         activeWindowId = activeId
     }
 
+    func setPaneBuffersForTesting(_ buffers: [String: TerminalBuffer]) {
+        paneBuffers = buffers
+    }
+
     /// Test-only: wire up tmux callbacks so `simulateLayoutChange` works.
     func wireCallbacksForTesting() {
         wireCallbacks()
@@ -1006,10 +1010,27 @@ final class ConnectionManager {
     /// Handle a window close notification.
     func handleWindowClose(_ windowId: String) {
         logger.info("Window closed: \(windowId)")
+        let wasActive = (activeWindowId == windowId)
         currentWindows.removeAll { $0.id == windowId }
-        if activeWindowId == windowId {
+        if wasActive {
             activeWindowId = currentWindows.first(where: { $0.isActive })?.id
                 ?? currentWindows.first?.id
+            // Clear pane state so onLayoutChange creates fresh buffers.
+            // tmux skips %layout-change when refresh-client -C reports the
+            // same dimensions, so nudge the size to force a real event.
+            paneBuffers = [:]
+            currentPanes = []
+            activePaneId = nil
+            scrolledBackPanes = []
+            paneHasNewOutput = []
+            Task {
+                let (cols, rows) = self.lastSentSize
+                guard cols > 0, rows > 0 else { return }
+                try? await self.sendControlCommand(
+                    "refresh-client -C \(cols),\(rows + 1)\n", type: .ignored)
+                try? await self.sendControlCommand(
+                    "refresh-client -C \(cols),\(rows)\n", type: .ignored)
+            }
         }
     }
 
@@ -1026,8 +1047,14 @@ final class ConnectionManager {
         let parsed = Self.parseWindowList(response)
         if !parsed.isEmpty {
             currentWindows = parsed
-            activeWindowId = parsed.first(where: { $0.isActive })?.id
-                ?? parsed.first?.id
+            // Preserve activeWindowId when the window still exists in the
+            // new list.  tmux auto-switches focus on new-window; blindly
+            // following that would hijack the app's active window and
+            // corrupt pane state via updateWindowPaneMapping.
+            if activeWindowId == nil || !parsed.contains(where: { $0.id == activeWindowId }) {
+                activeWindowId = parsed.first(where: { $0.isActive })?.id
+                    ?? parsed.first?.id
+            }
             updateWindowPaneMapping()
         }
     }

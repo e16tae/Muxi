@@ -44,3 +44,4 @@ ios/Muxi/Resources/Fonts/*.ttf
 
 # ── Claude Code ─────────────────────────────────────────────────────
 .claude/
+.superpowers/

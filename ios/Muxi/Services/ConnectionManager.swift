@@ -67,6 +67,16 @@ final class ConnectionManager {
         currentWindows = windows
         activeWindowId = activeId
     }
+
+    /// Test-only: wire up tmux callbacks so `simulateLayoutChange` works.
+    func wireCallbacksForTesting() {
+        wireCallbacks()
+    }
+
+    /// Test-only: simulate a `%layout-change` callback as if tmux sent it.
+    func simulateLayoutChange(windowId: String, panes: [TmuxControlService.ParsedPane]) {
+        tmuxService.onLayoutChange?(windowId, panes)
+    }
     #endif
 
     /// The server we are currently connected (or connecting) to.
@@ -90,6 +100,9 @@ final class ConnectionManager {
 
     /// The currently active window ID (e.g., "@0").
     private(set) var activeWindowId: String?
+
+    /// Set during a window switch; cleared when the matching `%layout-change` arrives.
+    private(set) var switchingToWindowId: String?
 
     /// The SSH service (exposed for actor-routed channel writes).
     private var sshServiceForWrites: SSHServiceProtocol { sshService }
@@ -430,6 +443,7 @@ final class ConnectionManager {
 
         currentWindows = []
         activeWindowId = nil
+        switchingToWindowId = nil
         scrolledBackPanes = []
         paneHasNewOutput = []
 
@@ -460,6 +474,7 @@ final class ConnectionManager {
             tmuxService.resetLineBuffer()
             paneBuffers = [:]
             currentPanes = []
+            switchingToWindowId = nil
             state = .disconnected
             sessions = []
             pendingCommands = []
@@ -666,19 +681,57 @@ final class ConnectionManager {
     // MARK: - Window/Session Commands
 
     /// Switch to a specific window by ID.
+    /// Optimistically updates local state and clears panes to show placeholder.
     func selectWindow(_ windowId: String) async throws {
         guard case .attached = state else { return }
+        guard windowId != activeWindowId else { return }
+
+        prepareWindowSwitch(to: windowId)
         try await sendControlCommand(
             "select-window -t \(windowId.shellEscaped())\n", type: .ignored)
+        try await forceLayoutRefresh()
     }
 
     /// Switch to a specific window and pane.
+    /// If the target is in a different window, applies optimistic update (clears panes).
+    /// If the target is in the same window, only switches the active pane.
     func selectWindowAndPane(windowId: String, paneId: String) async throws {
         guard case .attached = state else { return }
+
+        if windowId != activeWindowId {
+            prepareWindowSwitch(to: windowId)
+            try await sendControlCommand(
+                "select-window -t \(windowId.shellEscaped())\n", type: .ignored)
+            try await sendControlCommand(
+                "select-pane -t \(paneId.shellEscaped())\n", type: .ignored)
+            try await forceLayoutRefresh()
+        } else {
+            // Same-window pane switch — immediate
+            activePaneId = paneId
+            try await sendControlCommand(
+                "select-pane -t \(paneId.shellEscaped())\n", type: .ignored)
+        }
+    }
+
+    // MARK: - Window Switch Helpers
+
+    /// Optimistically reset local state for a cross-window switch.
+    private func prepareWindowSwitch(to windowId: String) {
+        switchingToWindowId = windowId
+        activeWindowId = windowId
+        currentPanes = []
+        activePaneId = nil
+        scrolledBackPanes = []
+        paneHasNewOutput = []
+    }
+
+    /// Force tmux to send %layout-change by re-sending the client size.
+    /// select-window only triggers %window-changed (not parsed by our C parser).
+    private func forceLayoutRefresh() async throws {
+        let (cols, rows) = lastSentSize
+        guard cols > 0, rows > 0 else { return }
         try await sendControlCommand(
-            "select-window -t \(windowId.shellEscaped())\n", type: .ignored)
-        try await sendControlCommand(
-            "select-pane -t \(paneId.shellEscaped())\n", type: .ignored)
+            "refresh-client -C \(cols),\(rows)\n", type: .ignored)
     }
 
     /// Rename the specified tmux session.
@@ -800,6 +853,7 @@ final class ConnectionManager {
         activeChannel = nil
         tmuxService.resetLineBuffer()
         pendingCommands = []
+        switchingToWindowId = nil
 
         for attempt in 1...maxReconnectAttempts {
             reconnectAttempt = attempt
@@ -1007,6 +1061,26 @@ final class ConnectionManager {
 
         tmuxService.onLayoutChange = { [weak self] windowId, panes in
             guard let self else { return }
+            // During a window switch, ignore layout-change from non-target windows.
+            if let target = self.switchingToWindowId, windowId != target {
+                return
+            }
+            // Clear transition flag — target window's layout arrived.
+            self.switchingToWindowId = nil
+
+            // Only update currentPanes/activeWindowId for the active window.
+            // refresh-client -C can trigger %layout-change for ALL windows;
+            // without this guard, a stale event from a non-active window would
+            // hijack focus back after a switch.
+            // Allow through when activeWindowId is nil (initial connect).
+            guard self.activeWindowId == nil || windowId == self.activeWindowId else {
+                // Still update the window's pane IDs in currentWindows.
+                if let idx = self.currentWindows.firstIndex(where: { $0.id == windowId }) {
+                    self.currentWindows[idx].paneIds = panes.map { "%\($0.paneId)" }
+                }
+                return
+            }
+
             self.currentPanes = panes
             self.activeWindowId = windowId
             // Mark this window as active in currentWindows
@@ -1171,6 +1245,7 @@ final class ConnectionManager {
             self.paneBuffers = [:]
             self.currentPanes = []
             self.activePaneId = nil
+            self.switchingToWindowId = nil
             self.scrolledBackPanes = []
             self.paneHasNewOutput = []
             self.currentWindows = []

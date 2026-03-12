@@ -141,4 +141,142 @@ final class WindowTrackingTests: XCTestCase {
         let manager = makeManager()
         try await manager.selectWindowAndPane(windowId: "@0", paneId: "%0")
     }
+
+    func testSelectWindowOptimisticUpdate() async throws {
+        let manager = makeConnectedManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        try await manager.selectWindow("@1")
+
+        // Optimistic: activeWindowId switches immediately
+        XCTAssertEqual(manager.activeWindowId, "@1")
+        // Panes cleared to trigger placeholder
+        XCTAssertTrue(manager.currentPanes.isEmpty)
+        // activePaneId cleared
+        XCTAssertNil(manager.activePaneId)
+        // Transition flag set
+        XCTAssertEqual(manager.switchingToWindowId, "@1")
+    }
+
+    func testSelectWindowSameWindowIsNoop() async throws {
+        let manager = makeConnectedManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        try await manager.selectWindow("@0")
+
+        // No change — same window
+        XCTAssertEqual(manager.activeWindowId, "@0")
+        XCTAssertEqual(manager.activePaneId, "%0")
+        XCTAssertNil(manager.switchingToWindowId)
+    }
+
+    // MARK: - selectWindowAndPane Tests
+
+    func testSelectWindowAndPaneOptimisticUpdate() async throws {
+        let manager = makeConnectedManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        try await manager.selectWindowAndPane(windowId: "@1", paneId: "%1")
+
+        XCTAssertEqual(manager.activeWindowId, "@1")
+        XCTAssertTrue(manager.currentPanes.isEmpty)
+        XCTAssertNil(manager.activePaneId)
+        XCTAssertEqual(manager.switchingToWindowId, "@1")
+    }
+
+    func testSelectWindowAndPaneSameWindowOnlyChangesPane() async throws {
+        let manager = makeConnectedManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        try await manager.selectWindowAndPane(windowId: "@0", paneId: "%1")
+
+        // Same window — no placeholder, just pane switch
+        XCTAssertEqual(manager.activeWindowId, "@0")
+        XCTAssertEqual(manager.activePaneId, "%1")
+        XCTAssertNil(manager.switchingToWindowId)
+    }
+
+    // MARK: - switchingToWindowId Reset Tests
+
+    func testDisconnectClearsSwitchingToWindowId() async throws {
+        let manager = makeConnectedManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+
+        try await manager.selectWindow("@1")
+        XCTAssertEqual(manager.switchingToWindowId, "@1")
+
+        manager.disconnect()
+        XCTAssertNil(manager.switchingToWindowId)
+    }
+
+    // MARK: - onLayoutChange Guard Tests
+
+    func testLayoutChangeGuardIgnoresStaleWindow() async throws {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        // Begin switch to @1
+        try await manager.selectWindow("@1")
+        XCTAssertEqual(manager.switchingToWindowId, "@1")
+
+        // Stale layout-change from @0 arrives — should be ignored
+        let stalePanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: stalePanes)
+
+        // Still transitioning — stale panes NOT applied
+        XCTAssertTrue(manager.currentPanes.isEmpty)
+        XCTAssertEqual(manager.switchingToWindowId, "@1")
+    }
+
+    func testLayoutChangeResolvesTransition() async throws {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        // Begin switch to @1
+        try await manager.selectWindow("@1")
+
+        // Matching layout-change arrives
+        let targetPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 1)]
+        manager.simulateLayoutChange(windowId: "@1", panes: targetPanes)
+
+        // Transition resolved
+        XCTAssertNil(manager.switchingToWindowId)
+        XCTAssertEqual(manager.currentPanes.count, 1)
+        XCTAssertEqual(manager.activePaneId, "%1")
+        XCTAssertEqual(manager.activeWindowId, "@1")
+    }
 }

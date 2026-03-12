@@ -802,3 +802,71 @@ import CVTParser
     vt_parser_feed(&parser, show, Int32(show.utf8.count))
     #expect(parser.cursor_visible == 1)
 }
+
+// MARK: - Cursor Style Tests (DECSCUSR)
+
+@Test func testCursorStyleSteadyBlock() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // CSI 2 SP q — steady block
+    let text = "\u{1B}[2 q"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    #expect(parser.cursor_style == 2)
+}
+
+@Test func testCursorStyleSteadyUnderline() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // CSI 4 SP q — steady underline
+    let text = "\u{1B}[4 q"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    #expect(parser.cursor_style == 4)
+}
+
+@Test func testCursorStyleSteadyBar() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // CSI 6 SP q — steady bar
+    let text = "\u{1B}[6 q"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    #expect(parser.cursor_style == 6)
+}
+
+@Test func testCursorStyleBlinkingBlockReset() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Set to bar, then reset to blinking block (0)
+    let bar = "\u{1B}[6 q"
+    vt_parser_feed(&parser, bar, Int32(bar.utf8.count))
+    #expect(parser.cursor_style == 6)
+
+    let reset = "\u{1B}[0 q"
+    vt_parser_feed(&parser, reset, Int32(reset.utf8.count))
+    #expect(parser.cursor_style == 0)
+}
+
+@Test func testCursorStyleNoParam() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Set to underline first
+    let underline = "\u{1B}[4 q"
+    vt_parser_feed(&parser, underline, Int32(underline.utf8.count))
+
+    // CSI SP q (no Ps) — default to 0 (blinking block)
+    let noParam = "\u{1B}[ q"
+    vt_parser_feed(&parser, noParam, Int32(noParam.utf8.count))
+    #expect(parser.cursor_style == 0)
+}

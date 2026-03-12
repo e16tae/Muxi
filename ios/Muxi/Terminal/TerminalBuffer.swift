@@ -41,6 +41,28 @@ struct TerminalCell {
     )
 }
 
+// MARK: - CursorStyle
+
+/// Terminal cursor shape, mapped from DECSCUSR values.
+enum CursorStyle: Equatable {
+    /// Block cursor (DECSCUSR 0, 1, 2).
+    case block
+    /// Underline cursor (DECSCUSR 3, 4).
+    case underline
+    /// Vertical bar/beam cursor (DECSCUSR 5, 6).
+    case bar
+
+    /// Map raw DECSCUSR value (0-6) to a CursorStyle.
+    /// Blink variants map to the same shape (blink is not rendered).
+    init(decscusr value: Int32) {
+        switch value {
+        case 3, 4: self = .underline
+        case 5, 6: self = .bar
+        default:   self = .block  // 0, 1, 2 and invalid values
+        }
+    }
+}
+
 // MARK: - TerminalBuffer
 
 /// Swift wrapper around the C VT parser. Takes terminal output as strings or
@@ -71,6 +93,12 @@ final class TerminalBuffer {
 
     /// Current cursor column (0-based).
     var cursorCol: Int { Int(parser.cursor_col) }
+
+    /// Whether the cursor is visible (DECTCEM).
+    var cursorVisible: Bool { parser.cursor_visible != 0 }
+
+    /// Current cursor style (DECSCUSR).
+    var cursorStyle: CursorStyle { CursorStyle(decscusr: parser.cursor_style) }
 
     // MARK: Lifecycle
 

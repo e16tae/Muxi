@@ -97,6 +97,10 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     /// Number of lines scrolled back from the bottom. 0 = live mode.
     var scrollOffset: Int = 0
 
+    /// Whether this pane is the active (focused) pane. Affects cursor shape:
+    /// focused panes show the program-requested style; unfocused show hollow block.
+    var isFocused: Bool = true
+
     // MARK: - Selection
 
     /// The currently selected range, if any. When set, `rebuildVertices()`
@@ -352,7 +356,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         let spaceUV = glyphUVs[" "] ?? GlyphUV(u: 0, v: 0, uMax: 0, vMax: 0, cellSpan: 1)
 
         var vertices: [CellVertex] = []
-        vertices.reserveCapacity(rowRange.count * cols * 6)
+        vertices.reserveCapacity(rowRange.count * cols * 6 + 24)
 
         let cw = Float(cellWidth)
         let ch = Float(cellHeight)
@@ -398,6 +402,25 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
             selectionInfo = nil
         }
 
+        // Pre-compute cursor rendering info.
+        let cursorInfo: (row: Int, col: Int, style: CursorStyle, color: SIMD4<Float>)?
+        if !isScrollback, let buf = buffer, buf.cursorVisible {
+            let cc = theme.cursor
+            cursorInfo = (
+                row: buf.cursorRow,
+                col: buf.cursorCol,
+                style: isFocused ? buf.cursorStyle : .block,
+                color: SIMD4<Float>(
+                    Float(cc.r) / 255.0,
+                    Float(cc.g) / 255.0,
+                    Float(cc.b) / 255.0,
+                    1.0
+                )
+            )
+        } else {
+            cursorInfo = nil
+        }
+
         // Second pass: build vertex data.
         for row in rowRange {
             // Map source row to screen row (0-based for vertex positioning).
@@ -429,10 +452,28 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                     1.0
                 )
 
-                // Block cursor: only show in live mode.
-                if !isScrollback,
-                   row == source.cursorRow && col == source.cursorCol {
-                    swap(&fg, &bg)
+                // Cursor rendering.
+                var cursorUnderline = false
+                var cursorBar = false
+                if let ci = cursorInfo, row == ci.row && col == ci.col {
+                    if isFocused {
+                        switch ci.style {
+                        case .block:
+                            // Filled block: cursor color as bg, theme bg as fg (for contrast).
+                            bg = ci.color
+                            fg = SIMD4<Float>(
+                                Float(theme.background.r) / 255.0,
+                                Float(theme.background.g) / 255.0,
+                                Float(theme.background.b) / 255.0,
+                                1.0
+                            )
+                        case .underline:
+                            cursorUnderline = true
+                        case .bar:
+                            cursorBar = true
+                        }
+                    }
+                    // Unfocused: hollow block outline is added below after the cell quad.
                 }
 
                 // Selection highlight: override background with theme selection color.
@@ -483,6 +524,65 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                 vertices.append(CellVertex(
                     position: SIMD2(x0, y1), uv: SIMD2(uv.u, uv.vMax),
                     fgColor: fg, bgColor: bg))
+
+                // Draw cursor overlays (underline, bar, or hollow block).
+                if let ci = cursorInfo, row == ci.row && col == ci.col {
+                    let spUV = spaceUV
+                    if isFocused && cursorUnderline {
+                        // Underline: 2px line at the bottom of the cell.
+                        let uy0 = y1 - 2
+                        let c = ci.color
+                        vertices.append(CellVertex(position: SIMD2(x0, uy0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, uy0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, uy0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                    } else if isFocused && cursorBar {
+                        // Bar: 2px line at the left edge of the cell.
+                        let bx1 = x0 + 2
+                        let c = ci.color
+                        vertices.append(CellVertex(position: SIMD2(x0, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(bx1, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(bx1, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(bx1, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                    } else if !isFocused {
+                        // Hollow block: 1.5px outline (4 edge rectangles).
+                        let t: Float = 1.5
+                        let c = ci.color
+
+                        // Top edge
+                        vertices.append(CellVertex(position: SIMD2(x0, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        // Bottom edge
+                        vertices.append(CellVertex(position: SIMD2(x0, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        // Left edge
+                        vertices.append(CellVertex(position: SIMD2(x0, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + t, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + t, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + t, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        // Right edge
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw - t, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw - t, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertices.append(CellVertex(position: SIMD2(x0 + cw - t, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                    }
+                }
             }
         }
 

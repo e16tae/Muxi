@@ -11,6 +11,7 @@ struct TerminalView: UIViewRepresentable {
     let theme: Theme
     var onPaste: ((String) -> Void)?
     var fontSize: CGFloat = 14
+    var isFocused: Bool = true
 
     // Scrollback
     var scrollbackBuffer: TerminalBuffer?
@@ -157,6 +158,9 @@ struct TerminalView: UIViewRepresentable {
             context.coordinator.cellWidth = context.coordinator.renderer?.cellWidth ?? 0
             context.coordinator.requestRedraw()
         }
+
+        // Update focus state.
+        context.coordinator.renderer?.isFocused = isFocused
     }
 
     // MARK: - Coordinator

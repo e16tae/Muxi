@@ -81,6 +81,17 @@ final class InputHandler {
     ///   UTF-8 encoding, and `altActive` is cleared.
     /// - Otherwise the character's UTF-8 encoding is returned as-is.
     func data(for character: Character) -> Data {
+        // iOS keyboard sends LF (0x0A) for Return, but terminals expect CR
+        // (0x0D).  In raw mode (TUI apps) icrnl is off, so 0x0A is NOT
+        // treated as Enter — send CR so it works in both cooked and raw mode.
+        if character == "\n" {
+            if altActive {
+                altActive = false
+                return Data([0x1B, 0x0D])
+            }
+            return Data([0x0D])
+        }
+
         if ctrlActive, let scalar = character.unicodeScalars.first {
             if let upper = Character(scalar).uppercased().first,
                let ascii = upper.asciiValue, ascii >= 0x40, ascii <= 0x5F {

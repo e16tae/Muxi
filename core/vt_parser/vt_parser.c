@@ -307,6 +307,23 @@ static void handle_csi(VTParserState *p, char cmd) {
         p->cursor_row = 0;
         p->cursor_col = 0;
         break;
+    case 'h': /* Set Mode */
+        if (p->csi_private) {
+            if (n == 25) p->cursor_visible = 1; /* DECTCEM: show cursor */
+        }
+        break;
+    case 'l': /* Reset Mode */
+        if (p->csi_private) {
+            if (n == 25) p->cursor_visible = 0; /* DECTCEM: hide cursor */
+        }
+        break;
+    case 'q': /* DECSCUSR — Set Cursor Style (when intermediate is SP) */
+        if (p->csi_intermediate == ' ') {
+            if (n >= 0 && n <= 6) {
+                p->cursor_style = n;
+            }
+        }
+        break;
     default:
         break;
     }
@@ -352,6 +369,8 @@ void vt_parser_init(VTParserState *parser, int32_t cols, int32_t rows) {
     parser->rows = rows;
     parser->scroll_top = 0;
     parser->scroll_bottom = rows - 1;
+    parser->cursor_visible = 1;
+    parser->cursor_style = 0;
     parser->buffer = (VTCell *)calloc((size_t)cols * (size_t)rows, sizeof(VTCell));
     if (!parser->buffer) {
         parser->cols = 0;
@@ -430,6 +449,7 @@ void vt_parser_feed(VTParserState *parser, const char *data, int32_t len) {
                 parser->state = VT_STATE_CSI_ENTRY;
                 parser->csi_param_count = 0;
                 parser->csi_private = 0;
+                parser->csi_intermediate = 0;
                 memset(parser->csi_params, 0, sizeof(parser->csi_params));
             } else if (ch == ']') {
                 parser->state = VT_STATE_OSC;
@@ -444,6 +464,10 @@ void vt_parser_feed(VTParserState *parser, const char *data, int32_t len) {
         case VT_STATE_CSI_ENTRY:
             if (ch == '?') {
                 parser->csi_private = 1;
+                parser->state = VT_STATE_CSI_PARAM;
+            } else if (ch >= 0x20 && ch <= 0x2F) {
+                /* Intermediate byte (e.g. SP for DECSCUSR) */
+                parser->csi_intermediate = ch;
                 parser->state = VT_STATE_CSI_PARAM;
             } else if (ch >= '0' && ch <= '9') {
                 parser->csi_params[0] = ch - '0';
@@ -478,6 +502,9 @@ void vt_parser_feed(VTParserState *parser, const char *data, int32_t len) {
                 /* CSI command character */
                 handle_csi(parser, (char)ch);
                 parser->state = VT_STATE_GROUND;
+            } else if (ch >= 0x20 && ch <= 0x2F) {
+                /* Intermediate byte (e.g. SP for DECSCUSR) */
+                parser->csi_intermediate = ch;
             } else {
                 /* Unexpected — abort CSI sequence */
                 parser->state = VT_STATE_GROUND;

@@ -262,4 +262,58 @@ final class TerminalBufferTests: XCTestCase {
         XCTAssertNotEqual(TerminalColor.rgb(255, 0, 0), TerminalColor.rgb(0, 255, 0))
         XCTAssertNotEqual(TerminalColor.default, TerminalColor.ansi(0))
     }
+
+    // MARK: - Cursor Visibility
+
+    func testCursorVisibleByDefault() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        XCTAssertTrue(buffer.cursorVisible)
+    }
+
+    func testCursorHide() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("\u{1B}[?25l")
+        XCTAssertFalse(buffer.cursorVisible)
+    }
+
+    func testCursorShowAfterHide() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("\u{1B}[?25l")
+        buffer.feed("\u{1B}[?25h")
+        XCTAssertTrue(buffer.cursorVisible)
+    }
+
+    // MARK: - Cursor Style
+
+    func testCursorStyleDefaultBlock() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        XCTAssertEqual(buffer.cursorStyle, .block)
+    }
+
+    func testCursorStyleBeam() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        // CSI 6 SP q — steady bar
+        buffer.feed("\u{1B}[6 q")
+        XCTAssertEqual(buffer.cursorStyle, .bar)
+    }
+
+    func testCursorStyleUnderline() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        // CSI 4 SP q — steady underline
+        buffer.feed("\u{1B}[4 q")
+        XCTAssertEqual(buffer.cursorStyle, .underline)
+    }
+
+    // MARK: - Cursor Hidden Integration
+
+    func testCursorHiddenPreventsRendering() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("Hello")
+        buffer.feed("\u{1B}[?25l")
+
+        // Verify the buffer reports cursor as hidden.
+        XCTAssertFalse(buffer.cursorVisible)
+        // Cursor position is still tracked even when hidden.
+        XCTAssertEqual(buffer.cursorCol, 5)
+    }
 }

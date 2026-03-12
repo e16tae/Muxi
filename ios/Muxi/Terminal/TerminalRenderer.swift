@@ -97,6 +97,10 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     /// Number of lines scrolled back from the bottom. 0 = live mode.
     var scrollOffset: Int = 0
 
+    /// Whether this pane is the active (focused) pane. Affects cursor shape:
+    /// focused panes show the program-requested style; unfocused show hollow block.
+    var isFocused: Bool = true
+
     // MARK: - Selection
 
     /// The currently selected range, if any. When set, `rebuildVertices()`

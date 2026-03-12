@@ -118,6 +118,7 @@ struct PaneContainerView: View {
                 theme: theme,
                 onPaste: onPaste,
                 fontSize: fontSize,
+                isFocused: true,
                 scrollbackBuffer: scrollbackBuffer,
                 scrollOffset: scrollbackOffset,
                 onScrollOffsetChanged: { delta in
@@ -182,6 +183,7 @@ struct PaneContainerView: View {
                             theme: theme,
                             onPaste: onPaste,
                             fontSize: fontSize,
+                            isFocused: isActive,
                             scrollbackBuffer: isActive ? scrollbackBuffer : nil,
                             scrollOffset: isActive ? scrollbackOffset : 0,
                             onScrollOffsetChanged: { delta in

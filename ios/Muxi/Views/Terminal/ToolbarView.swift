@@ -129,7 +129,6 @@ struct ToolbarView: View {
                     onNewSession?()
                 }
             )
-            .frame(width: 40, height: 40)
             .background(MuxiTokens.Colors.surfaceRaised)
             .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.sm))
 

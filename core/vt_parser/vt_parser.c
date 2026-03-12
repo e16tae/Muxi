@@ -307,6 +307,16 @@ static void handle_csi(VTParserState *p, char cmd) {
         p->cursor_row = 0;
         p->cursor_col = 0;
         break;
+    case 'h': /* Set Mode */
+        if (p->csi_private) {
+            if (n == 25) p->cursor_visible = 1; /* DECTCEM: show cursor */
+        }
+        break;
+    case 'l': /* Reset Mode */
+        if (p->csi_private) {
+            if (n == 25) p->cursor_visible = 0; /* DECTCEM: hide cursor */
+        }
+        break;
     default:
         break;
     }

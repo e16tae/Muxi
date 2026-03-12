@@ -775,3 +775,30 @@ import CVTParser
 
     #expect(parser.cursor_style == 0)
 }
+
+@Test func testCursorHide() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // CSI ?25l — hide cursor
+    let text = "\u{1B}[?25l"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    #expect(parser.cursor_visible == 0)
+}
+
+@Test func testCursorShow() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Hide then show
+    let hide = "\u{1B}[?25l"
+    vt_parser_feed(&parser, hide, Int32(hide.utf8.count))
+    #expect(parser.cursor_visible == 0)
+
+    let show = "\u{1B}[?25h"
+    vt_parser_feed(&parser, show, Int32(show.utf8.count))
+    #expect(parser.cursor_visible == 1)
+}

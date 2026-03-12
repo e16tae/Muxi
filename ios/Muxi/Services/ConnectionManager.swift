@@ -702,6 +702,7 @@ final class ConnectionManager {
 
         if windowId != activeWindowId {
             prepareWindowSwitch(to: windowId)
+            activePaneId = paneId
             try await sendControlCommand(
                 "select-window -t \(windowId.shellEscaped())\n", type: .ignored)
             try await sendControlCommand(

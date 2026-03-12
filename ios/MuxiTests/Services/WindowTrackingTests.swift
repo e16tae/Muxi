@@ -56,12 +56,36 @@ final class WindowTrackingTests: XCTestCase {
             .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
             .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
         ], activeId: "@0")
+        manager.activePaneId = "%0"
+        manager.setPaneBuffersForTesting(["%0": TerminalBuffer(cols: 80, rows: 24)])
 
         manager.handleWindowClose("@0")
 
         XCTAssertEqual(manager.currentWindows.count, 1)
         XCTAssertEqual(manager.currentWindows[0].id, "@1")
         XCTAssertEqual(manager.activeWindowId, "@1")
+        // Pane state must be cleared when the active window is closed
+        XCTAssertNil(manager.activePaneId)
+        XCTAssertTrue(manager.paneBuffers.isEmpty)
+        XCTAssertTrue(manager.currentPanes.isEmpty)
+    }
+
+    func testWindowCloseNonActivePreservesPaneState() {
+        let manager = makeManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+        manager.setPaneBuffersForTesting(["%0": TerminalBuffer(cols: 80, rows: 24)])
+
+        manager.handleWindowClose("@1")
+
+        XCTAssertEqual(manager.currentWindows.count, 1)
+        XCTAssertEqual(manager.activeWindowId, "@0")
+        // Pane state must be preserved when a non-active window is closed
+        XCTAssertEqual(manager.activePaneId, "%0")
+        XCTAssertEqual(manager.paneBuffers.count, 1)
     }
 
     func testWindowRenameUpdatesName() {
@@ -83,6 +107,38 @@ final class WindowTrackingTests: XCTestCase {
 
         XCTAssertEqual(manager.currentWindows.count, 2)
         XCTAssertEqual(manager.activeWindowId, "@0")
+    }
+
+    func testListWindowsResponsePreservesActiveWindowId() {
+        let manager = makeManager()
+        // Simulate: already on @0, then new-window creates @1 (tmux reports @1 active)
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        let response = "@0\t0\tbash\t0\n@1\t1\tbash\t1"
+        manager.handleListWindowsResponse(response)
+
+        // activeWindowId must stay @0 — it still exists in the list
+        XCTAssertEqual(manager.activeWindowId, "@0")
+        XCTAssertEqual(manager.currentWindows.count, 2)
+        XCTAssertEqual(manager.activePaneId, "%0")
+    }
+
+    func testListWindowsResponseUpdatesActiveWhenWindowGone() {
+        let manager = makeManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+
+        // @0 gone from the list, only @1 remains
+        let response = "@1\t0\tvim\t1"
+        manager.handleListWindowsResponse(response)
+
+        XCTAssertEqual(manager.activeWindowId, "@1")
+        XCTAssertEqual(manager.currentWindows.count, 1)
     }
 
     // MARK: - list-panes Parsing

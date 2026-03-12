@@ -45,20 +45,21 @@ struct TerminalCell {
 
 /// Terminal cursor shape, mapped from DECSCUSR values.
 enum CursorStyle: Equatable {
-    /// Block cursor (DECSCUSR 0, 1, 2).
+    /// Block cursor (DECSCUSR 1, 2).
     case block
     /// Underline cursor (DECSCUSR 3, 4).
     case underline
-    /// Vertical bar/beam cursor (DECSCUSR 5, 6).
+    /// Vertical bar/beam cursor (DECSCUSR 0, 5, 6).
     case bar
 
     /// Map raw DECSCUSR value (0-6) to a CursorStyle.
     /// Blink variants map to the same shape (blink is not rendered).
+    /// DECSCUSR 0 = "reset to default" — Muxi defaults to bar (modern convention).
     init(decscusr value: Int32) {
         switch value {
+        case 1, 2: self = .block
         case 3, 4: self = .underline
-        case 5, 6: self = .bar
-        default:   self = .block  // 0, 1, 2 and invalid values
+        default:   self = .bar  // 0 (default), 5, 6
         }
     }
 }

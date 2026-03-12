@@ -55,6 +55,9 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     private var atlasNextY: CGFloat = 0
     /// Set to true when new glyphs are added and the texture needs updating.
     private var atlasDirty = false
+    /// Dirty region Y bounds (pixel rows) for partial texture upload.
+    private var atlasDirtyMinY: Int = Int.max
+    private var atlasDirtyMaxY: Int = 0
 
     /// UV rectangle within the glyph atlas texture.
     struct GlyphUV {
@@ -76,8 +79,13 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         var bgColor: SIMD4<Float>
     }
 
-    private var vertexBuffer: MTLBuffer?
-    private var vertexCount: Int = 0
+    // Triple-buffered ring to avoid per-frame MTLBuffer allocation.
+    private static let maxFramesInFlight = 3
+    private let frameSemaphore = DispatchSemaphore(value: maxFramesInFlight)
+    private var ringBuffers: [MTLBuffer] = []
+    private var currentBufferIndex: Int = 0
+    private var ringVertexCounts: [Int] = [0, 0, 0]
+    private var ringBufferCapacity: Int = 0
 
     // MARK: - Buffer Reference
 
@@ -124,6 +132,36 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         prerenderASCII()
     }
 
+    deinit {
+        // Drain the semaphore to ensure no in-flight GPU work references our buffers.
+        for _ in 0..<Self.maxFramesInFlight { frameSemaphore.wait() }
+        for _ in 0..<Self.maxFramesInFlight { frameSemaphore.signal() }
+    }
+
+    // MARK: - Ring Buffer Management
+
+    /// Ensure ring buffers are large enough for the given grid size.
+    /// Called from `rebuildVertices()` which runs inside `draw()`'s semaphore hold,
+    /// so we only drain the remaining `maxFramesInFlight - 1` slots.
+    private func allocateRingBuffers(rows: Int, cols: Int) {
+        let needed = rows * cols * 6 + 36  // +36 for cursor overlay (6 cell + 24 hollow + 6 margin)
+        guard needed > ringBufferCapacity else { return }
+
+        // Caller (draw) already holds 1 semaphore slot.
+        // Wait for the remaining in-flight frames to complete.
+        let otherSlots = Self.maxFramesInFlight - 1
+        for _ in 0..<otherSlots { frameSemaphore.wait() }
+
+        let byteSize = MemoryLayout<CellVertex>.stride * needed
+        ringBuffers = (0..<Self.maxFramesInFlight).compactMap { _ in
+            device.makeBuffer(length: byteSize, options: .storageModeShared)
+        }
+        ringBufferCapacity = needed
+        ringVertexCounts = [0, 0, 0]
+
+        for _ in 0..<otherSlots { frameSemaphore.signal() }
+    }
+
     // MARK: - Public Helpers
 
     func updateFont(_ newFont: UIFont) {
@@ -132,6 +170,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         glyphUVs.removeAll()
         setupAtlas()
         prerenderASCII()
+        ringBufferCapacity = 0  // Force ring buffer reallocation on next rebuild.
         needsRedraw = true
     }
 
@@ -187,6 +226,8 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         desc.usage = .shaderRead
         atlasTexture = device.makeTexture(descriptor: desc)
         atlasDirty = true
+        atlasDirtyMinY = 0
+        atlasDirtyMaxY = atlasHeight
     }
 
     /// Pre-render ASCII printable characters (32-126) into the atlas.
@@ -255,29 +296,47 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         atlasNextX += glyphWidth
         atlasDirty = true
 
+        let glyphRowY = Int(atlasNextY)
+        let glyphRowBottom = Int(atlasNextY + cellHeight)
+        atlasDirtyMinY = min(atlasDirtyMinY, glyphRowY)
+        atlasDirtyMaxY = max(atlasDirtyMaxY, glyphRowBottom)
+
         return uv
     }
 
-    /// Upload the bitmap context to the Metal texture.
+    /// Upload changed rows of the bitmap context to the Metal texture.
     private func flushAtlasToTexture() {
-        guard atlasDirty,
-              let ctx = atlasContext,
-              let image = ctx.makeImage(),
-              let dataProvider = image.dataProvider,
-              let cfData = dataProvider.data,
-              let bytes = CFDataGetBytePtr(cfData)
-        else { return }
+        guard atlasDirty, let ctx = atlasContext, let basePtr = ctx.data else { return }
+
+        let bytesPerRow = atlasWidth * 4
+
+        // Determine upload region — dirty bounds or full fallback.
+        let regionY: Int
+        let regionHeight: Int
+        if atlasDirtyMinY < atlasDirtyMaxY {
+            regionY = atlasDirtyMinY
+            regionHeight = min(atlasDirtyMaxY, atlasHeight) - regionY
+        } else {
+            regionY = 0
+            regionHeight = atlasHeight
+        }
+
+        let offset = regionY * bytesPerRow
+        let srcPtr = basePtr.advanced(by: offset)
 
         atlasTexture?.replace(
             region: MTLRegion(
-                origin: MTLOrigin(x: 0, y: 0, z: 0),
-                size: MTLSize(width: atlasWidth, height: atlasHeight, depth: 1)
+                origin: MTLOrigin(x: 0, y: regionY, z: 0),
+                size: MTLSize(width: atlasWidth, height: regionHeight, depth: 1)
             ),
             mipmapLevel: 0,
-            withBytes: bytes,
-            bytesPerRow: atlasWidth * 4
+            withBytes: srcPtr,
+            bytesPerRow: bytesPerRow
         )
+
         atlasDirty = false
+        atlasDirtyMinY = Int.max
+        atlasDirtyMaxY = 0
     }
 
     /// Heuristic to detect wide (2-cell) characters.
@@ -355,27 +414,17 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         let cols = source.cols
         let spaceUV = glyphUVs[" "] ?? GlyphUV(u: 0, v: 0, uMax: 0, vMax: 0, cellSpan: 1)
 
-        var vertices: [CellVertex] = []
-        vertices.reserveCapacity(rowRange.count * cols * 6 + 24)
+        allocateRingBuffers(rows: rowRange.count, cols: cols)
+        guard !ringBuffers.isEmpty else { return }
+
+        let buf = ringBuffers[currentBufferIndex]
+        let vertexPtr = buf.contents().bindMemory(to: CellVertex.self, capacity: ringBufferCapacity)
+        var writeIndex = 0
 
         let cw = Float(cellWidth)
         let ch = Float(cellHeight)
 
-        // First pass: ensure all glyphs are in the atlas.
         var newGlyphs = false
-        for row in rowRange {
-            for col in 0..<cols {
-                let cell = source.cellAt(row: row, col: col)
-                if cell.width == 0 { continue }
-                if cell.character != " " && glyphUVs[cell.character] == nil {
-                    ensureGlyph(cell.character)
-                    newGlyphs = true
-                }
-            }
-        }
-        if newGlyphs {
-            flushAtlasToTexture()
-        }
 
         // Pre-compute normalized selection bounds and color outside the loop.
         let selectionInfo: (start: (row: Int, col: Int), end: (row: Int, col: Int), bgColor: SIMD4<Float>)?
@@ -421,14 +470,20 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
             cursorInfo = nil
         }
 
-        // Second pass: build vertex data.
-        for row in rowRange {
-            // Map source row to screen row (0-based for vertex positioning).
+        // Single pass: discover new glyphs and build vertex data together.
+        rowLoop: for row in rowRange {
             let screenRow = row - rowRange.lowerBound
 
             for col in 0..<cols {
                 let cell = source.cellAt(row: row, col: col)
-                if cell.width == 0 { continue }
+                let isCursorCell = cursorInfo.map { $0.row == row && $0.col == col } ?? false
+                if cell.width == 0 && !isCursorCell { continue }
+
+                // Inline glyph discovery (ensureGlyph is idempotent).
+                if cell.character != " " && glyphUVs[cell.character] == nil {
+                    ensureGlyph(cell.character)
+                    newGlyphs = true
+                }
 
                 var fgTermColor = cell.fgColor
                 var bgTermColor = cell.bgColor
@@ -497,7 +552,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                 }
 
                 let uv = glyphUVs[cell.character] ?? spaceUV
-                let cellSpan = Int(cell.width)
+                let cellSpan = max(Int(cell.width), 1)
                 let quadWidth = cw * Float(cellSpan)
 
                 let x0 = Float(col) * cw
@@ -505,97 +560,82 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
                 let x1 = x0 + quadWidth
                 let y1 = y0 + ch
 
-                vertices.append(CellVertex(
-                    position: SIMD2(x0, y0), uv: SIMD2(uv.u, uv.v),
-                    fgColor: fg, bgColor: bg))
-                vertices.append(CellVertex(
-                    position: SIMD2(x1, y0), uv: SIMD2(uv.uMax, uv.v),
-                    fgColor: fg, bgColor: bg))
-                vertices.append(CellVertex(
-                    position: SIMD2(x0, y1), uv: SIMD2(uv.u, uv.vMax),
-                    fgColor: fg, bgColor: bg))
-
-                vertices.append(CellVertex(
-                    position: SIMD2(x1, y0), uv: SIMD2(uv.uMax, uv.v),
-                    fgColor: fg, bgColor: bg))
-                vertices.append(CellVertex(
-                    position: SIMD2(x1, y1), uv: SIMD2(uv.uMax, uv.vMax),
-                    fgColor: fg, bgColor: bg))
-                vertices.append(CellVertex(
-                    position: SIMD2(x0, y1), uv: SIMD2(uv.u, uv.vMax),
-                    fgColor: fg, bgColor: bg))
+                guard writeIndex + 6 <= ringBufferCapacity else { break rowLoop }
+                vertexPtr[writeIndex]     = CellVertex(position: SIMD2(x0, y0), uv: SIMD2(uv.u, uv.v), fgColor: fg, bgColor: bg)
+                vertexPtr[writeIndex + 1] = CellVertex(position: SIMD2(x1, y0), uv: SIMD2(uv.uMax, uv.v), fgColor: fg, bgColor: bg)
+                vertexPtr[writeIndex + 2] = CellVertex(position: SIMD2(x0, y1), uv: SIMD2(uv.u, uv.vMax), fgColor: fg, bgColor: bg)
+                vertexPtr[writeIndex + 3] = CellVertex(position: SIMD2(x1, y0), uv: SIMD2(uv.uMax, uv.v), fgColor: fg, bgColor: bg)
+                vertexPtr[writeIndex + 4] = CellVertex(position: SIMD2(x1, y1), uv: SIMD2(uv.uMax, uv.vMax), fgColor: fg, bgColor: bg)
+                vertexPtr[writeIndex + 5] = CellVertex(position: SIMD2(x0, y1), uv: SIMD2(uv.u, uv.vMax), fgColor: fg, bgColor: bg)
+                writeIndex += 6
 
                 // Draw cursor overlays (underline, bar, or hollow block).
                 if let ci = cursorInfo, row == ci.row && col == ci.col {
                     let spUV = spaceUV
                     if isFocused && cursorUnderline {
-                        // Underline: 2px line at the bottom of the cell.
                         let uy0 = y1 - 2
                         let c = ci.color
-                        vertices.append(CellVertex(position: SIMD2(x0, uy0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, uy0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, uy0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        guard writeIndex + 6 <= ringBufferCapacity else { break rowLoop }
+                        vertexPtr[writeIndex]     = CellVertex(position: SIMD2(x0, uy0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 1] = CellVertex(position: SIMD2(x0 + cw, uy0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 2] = CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 3] = CellVertex(position: SIMD2(x0 + cw, uy0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 4] = CellVertex(position: SIMD2(x0 + cw, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 5] = CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        writeIndex += 6
                     } else if isFocused && cursorBar {
-                        // Bar: 2px line at the left edge of the cell.
                         let bx1 = x0 + 2
                         let c = ci.color
-                        vertices.append(CellVertex(position: SIMD2(x0, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(bx1, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(bx1, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(bx1, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        guard writeIndex + 6 <= ringBufferCapacity else { break rowLoop }
+                        vertexPtr[writeIndex]     = CellVertex(position: SIMD2(x0, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 1] = CellVertex(position: SIMD2(bx1, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 2] = CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 3] = CellVertex(position: SIMD2(bx1, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 4] = CellVertex(position: SIMD2(bx1, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 5] = CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        writeIndex += 6
                     } else if !isFocused {
-                        // Hollow block: 1.5px outline (4 edge rectangles).
                         let t: Float = 1.5
                         let c = ci.color
-
+                        guard writeIndex + 24 <= ringBufferCapacity else { break rowLoop }
                         // Top edge
-                        vertices.append(CellVertex(position: SIMD2(x0, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertexPtr[writeIndex]     = CellVertex(position: SIMD2(x0, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 1] = CellVertex(position: SIMD2(x0 + cw, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 2] = CellVertex(position: SIMD2(x0, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 3] = CellVertex(position: SIMD2(x0 + cw, y0), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 4] = CellVertex(position: SIMD2(x0 + cw, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 5] = CellVertex(position: SIMD2(x0, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
                         // Bottom edge
-                        vertices.append(CellVertex(position: SIMD2(x0, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertexPtr[writeIndex + 6]  = CellVertex(position: SIMD2(x0, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 7]  = CellVertex(position: SIMD2(x0 + cw, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 8]  = CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 9]  = CellVertex(position: SIMD2(x0 + cw, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 10] = CellVertex(position: SIMD2(x0 + cw, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 11] = CellVertex(position: SIMD2(x0, y1), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
                         // Left edge
-                        vertices.append(CellVertex(position: SIMD2(x0, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + t, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + t, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + t, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertexPtr[writeIndex + 12] = CellVertex(position: SIMD2(x0, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 13] = CellVertex(position: SIMD2(x0 + t, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 14] = CellVertex(position: SIMD2(x0, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 15] = CellVertex(position: SIMD2(x0 + t, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 16] = CellVertex(position: SIMD2(x0 + t, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 17] = CellVertex(position: SIMD2(x0, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
                         // Right edge
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw - t, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw - t, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
-                        vertices.append(CellVertex(position: SIMD2(x0 + cw - t, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c))
+                        vertexPtr[writeIndex + 18] = CellVertex(position: SIMD2(x0 + cw - t, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 19] = CellVertex(position: SIMD2(x0 + cw, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 20] = CellVertex(position: SIMD2(x0 + cw - t, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 21] = CellVertex(position: SIMD2(x0 + cw, y0 + t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 22] = CellVertex(position: SIMD2(x0 + cw, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        vertexPtr[writeIndex + 23] = CellVertex(position: SIMD2(x0 + cw - t, y1 - t), uv: SIMD2(spUV.u, spUV.v), fgColor: c, bgColor: c)
+                        writeIndex += 24
                     }
                 }
             }
         }
 
-        vertexCount = vertices.count
-        guard vertexCount > 0 else {
-            vertexBuffer = nil
-            return
-        }
-        vertexBuffer = device.makeBuffer(
-            bytes: vertices,
-            length: MemoryLayout<CellVertex>.stride * vertexCount,
-            options: .storageModeShared
-        )
+        // Flush any newly discovered glyphs before building the vertex buffer.
+        if newGlyphs { flushAtlasToTexture() }
+
+        ringVertexCounts[currentBufferIndex] = writeIndex
     }
 
     // MARK: - MTKViewDelegate
@@ -612,12 +652,19 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
 
     func draw(in view: MTKView) {
         guard let pipelineState,
-              cachedViewportSize.x > 0, cachedViewportSize.y > 0,
-              let drawable = view.currentDrawable,
+              cachedViewportSize.x > 0, cachedViewportSize.y > 0
+        else { return }
+
+        frameSemaphore.wait()
+
+        guard let drawable = view.currentDrawable,
               let renderPassDesc = view.currentRenderPassDescriptor,
               let commandBuffer = commandQueue.makeCommandBuffer(),
               let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDesc)
-        else { return }
+        else {
+            frameSemaphore.signal()
+            return
+        }
 
         if needsRedraw {
             if Thread.isMainThread {
@@ -630,12 +677,16 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
             needsRedraw = false
         }
 
+        let bufferIndex = currentBufferIndex
+        let vertexCount = ringVertexCounts[bufferIndex]
+        currentBufferIndex = (currentBufferIndex + 1) % Self.maxFramesInFlight
+
         var viewportSize = cachedViewportSize
 
         encoder.setRenderPipelineState(pipelineState)
 
-        if let vb = vertexBuffer {
-            encoder.setVertexBuffer(vb, offset: 0, index: 0)
+        if bufferIndex < ringBuffers.count {
+            encoder.setVertexBuffer(ringBuffers[bufferIndex], offset: 0, index: 0)
         }
         encoder.setVertexBytes(&viewportSize, length: MemoryLayout<SIMD2<Float>>.stride, index: 1)
 
@@ -649,6 +700,10 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
 
         encoder.endEncoding()
         commandBuffer.present(drawable)
+
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            self?.frameSemaphore.signal()
+        }
         commandBuffer.commit()
     }
 }

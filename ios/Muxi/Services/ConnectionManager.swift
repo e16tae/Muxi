@@ -121,9 +121,20 @@ final class ConnectionManager {
     }
 
     /// Send raw key data to a pane via `send-keys`.
+    ///
+    /// Non-ASCII data (Korean, CJK, emoji, etc.) uses `send-keys -l` (literal
+    /// mode) so tmux transmits the complete character.  Hex mode (`0xXX`) sends
+    /// individual bytes, which remote shells misinterpret as separate Latin-1
+    /// characters when UTF-8 locale isn't configured.
     func sendKeysToPane(_ paneId: String, data: Data) async throws {
-        let hexKeys = data.map { String(format: "0x%02x", $0) }.joined(separator: " ")
-        let command = "send-keys -t \(paneId.shellEscaped()) \(hexKeys)\n"
+        let command: String
+        if data.contains(where: { $0 >= 0x80 }),
+           let text = String(data: data, encoding: .utf8) {
+            command = "send-keys -t \(paneId.shellEscaped()) -l \(text.tmuxQuoted())\n"
+        } else {
+            let hexKeys = data.map { String(format: "0x%02x", $0) }.joined(separator: " ")
+            command = "send-keys -t \(paneId.shellEscaped()) \(hexKeys)\n"
+        }
         try await sendControlCommand(command, type: .ignored)
     }
 

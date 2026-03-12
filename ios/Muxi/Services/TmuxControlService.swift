@@ -35,6 +35,9 @@ final class TmuxControlService {
     /// Called when the active pane changes within a window.
     var onWindowPaneChanged: ((_ windowId: String, _ paneId: String) -> Void)?
 
+    /// Called when the active window changes within a session.
+    var onSessionWindowChanged: ((_ sessionId: String, _ windowId: String) -> Void)?
+
     /// Called when the active session changes.
     var onSessionChanged: ((_ sessionId: String, _ name: String) -> Void)?
 
@@ -220,6 +223,11 @@ final class TmuxControlService {
                 let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
                 let paneId = extractString(from: &msg.pane_id, capacity: Int(TMUX_ID_MAX))
                 onWindowPaneChanged?(windowId, paneId)
+
+            case TMUX_MSG_SESSION_WINDOW_CHANGED:
+                let sessionId = extractString(from: &msg.session_id, capacity: Int(TMUX_ID_MAX))
+                let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                onSessionWindowChanged?(sessionId, windowId)
 
             case TMUX_MSG_SESSION_CHANGED:
                 let sessionId = extractString(from: &msg.session_id, capacity: Int(TMUX_ID_MAX))

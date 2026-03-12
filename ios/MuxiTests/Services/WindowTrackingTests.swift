@@ -314,7 +314,7 @@ final class WindowTrackingTests: XCTestCase {
 
         XCTAssertEqual(manager.activeWindowId, "@1")
         XCTAssertTrue(manager.currentPanes.isEmpty)
-        XCTAssertNil(manager.activePaneId)
+        XCTAssertEqual(manager.activePaneId, "%1")  // optimistically set
         XCTAssertEqual(manager.switchingToWindowId, "@1")
     }
 
@@ -374,6 +374,94 @@ final class WindowTrackingTests: XCTestCase {
         // Still transitioning — stale panes NOT applied
         XCTAssertTrue(manager.currentPanes.isEmpty)
         XCTAssertEqual(manager.switchingToWindowId, "@1")
+    }
+
+    // MARK: - %window-pane-changed Auto-Focus Tests
+
+    func testWindowPaneChangedSameWindowUpdatesActivePane() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Same-window pane change (e.g., split-window)
+        manager.simulateWindowPaneChanged(windowId: "@0", paneId: "%1")
+        XCTAssertEqual(manager.activePaneId, "%1")
+        XCTAssertEqual(manager.activeWindowId, "@0")
+    }
+
+    func testSessionWindowChangedSwitchesWindow() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Session window changed (e.g., new-window)
+        manager.simulateSessionWindowChanged(sessionId: "$0", windowId: "@1")
+
+        // Should switch to the new window
+        XCTAssertEqual(manager.activeWindowId, "@1")
+        // switchingToWindowId set by prepareWindowSwitch, cleared by next layout-change
+        XCTAssertEqual(manager.switchingToWindowId, "@1")
+        // currentPanes cleared during transition
+        XCTAssertTrue(manager.currentPanes.isEmpty)
+    }
+
+    func testSessionWindowChangedIgnoredForSameWindow() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Same window — should be ignored
+        manager.simulateSessionWindowChanged(sessionId: "$0", windowId: "@0")
+
+        // Nothing changed
+        XCTAssertEqual(manager.activeWindowId, "@0")
+        XCTAssertEqual(manager.activePaneId, "%0")
+        XCTAssertNil(manager.switchingToWindowId)
+    }
+
+    /// End-to-end: %session-window-changed → prepareWindowSwitch → %layout-change resolves.
+    func testSessionWindowChangedThenLayoutChangeResolvesTransition() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Step 1: %session-window-changed switches to @1
+        manager.simulateSessionWindowChanged(sessionId: "$0", windowId: "@1")
+
+        XCTAssertEqual(manager.activeWindowId, "@1")
+        XCTAssertEqual(manager.switchingToWindowId, "@1")
+        XCTAssertTrue(manager.currentPanes.isEmpty)
+
+        // Step 2: %layout-change for @1 arrives (from forceLayoutRefresh)
+        let newPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 120, height: 36, paneId: 5)]
+        manager.simulateLayoutChange(windowId: "@1", panes: newPanes)
+
+        // Transition fully resolved
+        XCTAssertNil(manager.switchingToWindowId)
+        XCTAssertEqual(manager.currentPanes.count, 1)
+        XCTAssertEqual(manager.activePaneId, "%5")
+        XCTAssertEqual(manager.activeWindowId, "@1")
+        // Buffer created for the new pane
+        XCTAssertNotNil(manager.paneBuffers["%5"])
+        // Old pane buffer cleaned up
+        XCTAssertNil(manager.paneBuffers["%0"])
+        // Window active flags updated
+        XCTAssertFalse(manager.currentWindows.first(where: { $0.id == "@0" })?.isActive ?? true)
+        XCTAssertTrue(manager.currentWindows.first(where: { $0.id == "@1" })?.isActive ?? false)
     }
 
     func testLayoutChangeResolvesTransition() async throws {

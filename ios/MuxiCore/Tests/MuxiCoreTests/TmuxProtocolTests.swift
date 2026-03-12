@@ -399,6 +399,20 @@ private func string(from ptr: UnsafePointer<CChar>) -> String {
     }
 }
 
+@Test func testParseSessionWindowChanged() {
+    let line = "%session-window-changed $0 @3"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_SESSION_WINDOW_CHANGED)
+        let sessionId = withUnsafePointer(to: &msg.session_id.0) { string(from: $0) }
+        #expect(sessionId == "$0")
+        let windowId = withUnsafePointer(to: &msg.window_id.0) { string(from: $0) }
+        #expect(windowId == "@3")
+    }
+}
+
 @Test func testParseUnlinkedWindowClose() {
     let line = "%unlinked-window-close @3"
     line.withCString { cLine in

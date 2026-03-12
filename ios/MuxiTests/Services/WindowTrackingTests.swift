@@ -85,6 +85,70 @@ final class WindowTrackingTests: XCTestCase {
         XCTAssertEqual(manager.activeWindowId, "@0")
     }
 
+    // MARK: - list-panes Parsing
+
+    func testParseListPanes() {
+        let output = "@0\t%0\n@0\t%1\n@1\t%2"
+        let mapping = ConnectionManager.parseListPanes(output)
+        XCTAssertEqual(mapping["@0"], ["%0", "%1"])
+        XCTAssertEqual(mapping["@1"], ["%2"])
+    }
+
+    func testParseListPanesEmpty() {
+        let mapping = ConnectionManager.parseListPanes("")
+        XCTAssertTrue(mapping.isEmpty)
+    }
+
+    func testParseListPanesMalformed() {
+        let output = "@0\n%1"  // missing tab separator
+        let mapping = ConnectionManager.parseListPanes(output)
+        XCTAssertTrue(mapping.isEmpty)
+    }
+
+    func testHandleListPanesResponsePopulatesPaneIds() {
+        let manager = makeManager()
+        // Simulate list-windows already arrived
+        manager.handleListWindowsResponse("@0\t0\tbash\t1\n@1\t1\tvim\t0")
+        XCTAssertEqual(manager.currentWindows[0].paneIds, [])
+        XCTAssertEqual(manager.currentWindows[1].paneIds, [])
+
+        // list-panes response arrives
+        manager.handleListPanesResponse("@0\t%0\n@0\t%1\n@1\t%2")
+
+        XCTAssertEqual(manager.currentWindows[0].paneIds, ["%0", "%1"])
+        XCTAssertEqual(manager.currentWindows[1].paneIds, ["%2"])
+    }
+
+    func testHandleListPanesResponsePreservesUnmatchedWindows() {
+        let manager = makeManager()
+        manager.handleListWindowsResponse("@0\t0\tbash\t1\n@1\t1\tvim\t0")
+
+        // list-panes only has @0 (tmux might not report empty windows)
+        manager.handleListPanesResponse("@0\t%0")
+
+        XCTAssertEqual(manager.currentWindows[0].paneIds, ["%0"])
+        XCTAssertEqual(manager.currentWindows[1].paneIds, [])
+    }
+
+    func testUpdateWindowPaneMappingSyncsActivePanes() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.handleListWindowsResponse("@0\t0\tbash\t1\n@1\t1\tvim\t0")
+
+        // Simulate layout-change setting currentPanes for active window
+        let panes = [
+            TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 12, paneId: 0),
+            TmuxControlService.ParsedPane(x: 0, y: 12, width: 80, height: 12, paneId: 1),
+        ]
+        manager.simulateLayoutChange(windowId: "@0", panes: panes)
+
+        // Now simulate list-windows arriving again (replaces currentWindows)
+        manager.handleListWindowsResponse("@0\t0\tbash\t1\n@1\t1\tvim\t0")
+
+        // updateWindowPaneMapping should have restored active window's paneIds
+        XCTAssertEqual(manager.currentWindows[0].paneIds, ["%0", "%1"])
+    }
+
     // MARK: - Session/Window Command Tests
 
     func testRenameSessionUpdatesLocalState() async throws {

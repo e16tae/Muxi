@@ -176,6 +176,8 @@ final class ConnectionManager {
         case createSession
         /// `list-windows -F '...'` — refresh the window list.
         case listWindows
+        /// `list-panes -a -F '...'` — refresh pane-to-window mapping for all windows.
+        case listPanes
         /// Any command whose response we don't need (send-keys, refresh-client, etc.).
         case ignored
     }
@@ -1029,19 +1031,39 @@ final class ConnectionManager {
         }
     }
 
+    /// Handle the `list-panes -a` response and populate every window's paneIds.
+    func handleListPanesResponse(_ response: String) {
+        let mapping = Self.parseListPanes(response)
+        for i in currentWindows.indices {
+            if let panes = mapping[currentWindows[i].id] {
+                currentWindows[i].paneIds = panes
+            }
+        }
+    }
+
     /// Request a window list refresh via the control channel.
+    /// Sends `list-windows` followed by `list-panes -a` so that every
+    /// window's ``TmuxWindowInfo/paneIds`` is populated.
     private func requestWindowListRefresh() {
         Task {
             try? await sendControlCommand(
                 "list-windows -F '#{window_id}\t#{window_index}\t#{window_name}\t#{window_active}'\n",
                 type: .listWindows)
+            try? await sendControlCommand(
+                "list-panes -a -F '#{window_id}\t#{pane_id}'\n",
+                type: .listPanes)
         }
     }
 
-    /// Associate pane IDs from currentPanes with their windows.
+    /// Sync ``currentPanes`` into the active window's ``TmuxWindowInfo/paneIds``.
+    /// Called after ``handleListWindowsResponse`` replaces ``currentWindows``
+    /// (which resets all paneIds to `[]`) so the active window's pane pills
+    /// appear immediately — before the ``list-panes`` response arrives.
     private func updateWindowPaneMapping() {
-        // currentPanes only contains panes for the currently visible window.
-        // Active window panes are updated in onLayoutChange.
+        guard let activeId = activeWindowId,
+              let idx = currentWindows.firstIndex(where: { $0.id == activeId })
+        else { return }
+        currentWindows[idx].paneIds = currentPanes.map { "%\($0.paneId)" }
     }
 
     // MARK: - Callback Wiring
@@ -1229,6 +1251,8 @@ final class ConnectionManager {
                 Task { try? await self.switchSession(to: name) }
             case .listWindows:
                 self.handleListWindowsResponse(response)
+            case .listPanes:
+                self.handleListPanesResponse(response)
             case .ignored:
                 break
             }
@@ -1304,6 +1328,19 @@ final class ConnectionManager {
                 let isActive = parts[3] == "1"
                 return TmuxWindowInfo(id: id, name: name, paneIds: [], isActive: isActive)
             }
+    }
+
+    /// Parse the output of `list-panes -a -F '#{window_id}\t#{pane_id}'`
+    /// into a mapping from window ID to ordered pane IDs.
+    static func parseListPanes(_ output: String) -> [String: [String]] {
+        var mapping: [String: [String]] = [:]
+        for line in output.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "\n") {
+            let parts = line.split(separator: "\t", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            mapping[String(parts[0]), default: []].append(String(parts[1]))
+        }
+        return mapping
     }
 
     /// Re-query the remote server for the current list of tmux sessions

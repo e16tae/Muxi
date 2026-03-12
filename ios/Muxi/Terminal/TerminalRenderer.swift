@@ -453,7 +453,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
 
         // Pre-compute cursor rendering info.
         let cursorInfo: (row: Int, col: Int, style: CursorStyle, color: SIMD4<Float>)?
-        if !isScrollback, let buf = buffer, buf.cursorVisible {
+        if !isScrollback, let buf = buffer {
             let cc = theme.cursor
             cursorInfo = (
                 row: buf.cursorRow,

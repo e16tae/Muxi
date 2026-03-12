@@ -170,7 +170,7 @@ struct Theme: Codable, Identifiable, Equatable {
         name: "Catppuccin Mocha",
         foreground: ThemeColor(r: 205, g: 214, b: 244),   // #CDD6F4
         background: ThemeColor(r: 30, g: 30, b: 46),      // #1E1E2E
-        cursor: ThemeColor(r: 245, g: 224, b: 220),       // #F5E0DC
+        cursor: ThemeColor(r: 207, g: 190, b: 240),       // #CFBEF0
         selection: ThemeColor(r: 88, g: 91, b: 112),      // #585B70
         ansiColors: [
             ThemeColor(r: 69, g: 71, b: 90),              //  0: Surface1  #45475A

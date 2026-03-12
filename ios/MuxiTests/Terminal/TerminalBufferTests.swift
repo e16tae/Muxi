@@ -285,9 +285,9 @@ final class TerminalBufferTests: XCTestCase {
 
     // MARK: - Cursor Style
 
-    func testCursorStyleDefaultBlock() {
+    func testCursorStyleDefaultBar() {
         let buffer = TerminalBuffer(cols: 80, rows: 24)
-        XCTAssertEqual(buffer.cursorStyle, .block)
+        XCTAssertEqual(buffer.cursorStyle, .bar)
     }
 
     func testCursorStyleBeam() {

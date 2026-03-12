@@ -3,7 +3,7 @@
     "name": "Catppuccin Mocha",
     "foreground": {"r": 205, "g": 214, "b": 244},
     "background": {"r": 30, "g": 30, "b": 46},
-    "cursor": {"r": 245, "g": 224, "b": 220},
+    "cursor": {"r": 207, "g": 190, "b": 240},
     "selection": {"r": 88, "g": 91, "b": 112},
     "ansiColors": [
         {"r": 69, "g": 71, "b": 90},

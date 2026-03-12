@@ -201,6 +201,30 @@ final class InputHandlerTests: XCTestCase {
         XCTAssertFalse(handler.altActive)
     }
 
+    // MARK: - Return Key (LF → CR)
+
+    func testReturnKeyProducesCR() {
+        // iOS keyboard sends "\n" (0x0A) for Return, but terminals expect
+        // CR (0x0D) so TUI apps in raw mode recognise it as Enter.
+        let data = handler.data(for: "\n")
+        XCTAssertEqual(data, Data([0x0D]))
+    }
+
+    func testAltReturnProducesESCPlusCR() {
+        handler.toggleAlt()
+        let data = handler.data(for: "\n")
+        XCTAssertEqual(data, Data([0x1B, 0x0D]))
+        XCTAssertFalse(handler.altActive)
+    }
+
+    func testCtrlReturnStillProducesCRAndKeepsCtrl() {
+        // Return mapping takes priority; Ctrl is not consumed.
+        handler.toggleCtrl()
+        let data = handler.data(for: "\n")
+        XCTAssertEqual(data, Data([0x0D]))
+        XCTAssertTrue(handler.ctrlActive, "Ctrl should remain active — Return consumed it first")
+    }
+
     // MARK: - Edge Cases
 
     func testCtrlWithNonLetterCharacterPassesThroughAndKeepsCtrl() {

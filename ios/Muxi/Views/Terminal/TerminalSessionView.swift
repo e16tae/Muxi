@@ -111,7 +111,6 @@ struct TerminalSessionView: View {
                 },
                 onSelectWindowAndPane: { windowId, paneId in
                     isKeyboardActive = true
-                    connectionManager.activePaneId = paneId
                     Task {
                         try? await connectionManager.selectWindowAndPane(
                             windowId: windowId, paneId: paneId)
@@ -285,7 +284,9 @@ struct TerminalSessionView: View {
         VStack {
             Spacer()
             ProgressView()
-            Text("Attaching to \(sessionName)...")
+            Text(connectionManager.switchingToWindowId != nil
+                ? "Switching window..."
+                : "Attaching to \(sessionName)...")
                 .font(MuxiTokens.Typography.caption)
                 .foregroundStyle(MuxiTokens.Colors.textSecondary)
                 .padding(.top, MuxiTokens.Spacing.sm)

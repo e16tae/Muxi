@@ -303,4 +303,17 @@ final class TerminalBufferTests: XCTestCase {
         buffer.feed("\u{1B}[4 q")
         XCTAssertEqual(buffer.cursorStyle, .underline)
     }
+
+    // MARK: - Cursor Hidden Integration
+
+    func testCursorHiddenPreventsRendering() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("Hello")
+        buffer.feed("\u{1B}[?25l")
+
+        // Verify the buffer reports cursor as hidden.
+        XCTAssertFalse(buffer.cursorVisible)
+        // Cursor position is still tracked even when hidden.
+        XCTAssertEqual(buffer.cursorCol, 5)
+    }
 }

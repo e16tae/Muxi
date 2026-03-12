@@ -214,6 +214,23 @@ final class WindowTrackingTests: XCTestCase {
         XCTAssertNil(manager.switchingToWindowId)
     }
 
+    // MARK: - switchingToWindowId Reset Tests
+
+    func testDisconnectClearsSwitchingToWindowId() async throws {
+        let manager = makeConnectedManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+
+        try await manager.selectWindow("@1")
+        XCTAssertEqual(manager.switchingToWindowId, "@1")
+
+        manager.disconnect()
+        XCTAssertNil(manager.switchingToWindowId)
+    }
+
     // MARK: - onLayoutChange Guard Tests
 
     func testLayoutChangeGuardIgnoresStaleWindow() async throws {

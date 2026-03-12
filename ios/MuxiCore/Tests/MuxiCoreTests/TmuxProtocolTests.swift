@@ -318,6 +318,43 @@ private func string(from ptr: UnsafePointer<CChar>) -> String {
     #expect(msgType == TMUX_MSG_UNKNOWN)
 }
 
+// MARK: - Output Leading Space Preservation
+
+@Test func testParseOutputPreservesLeadingSpace() {
+    // When the shell echoes a space character, tmux sends:
+    //   %output %0  <space>
+    // (delimiter space + data space).  The parser must NOT strip the data space.
+    let line = "%output %0  "  // one delimiter space + one data space
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_OUTPUT)
+        #expect(msg.output_data != nil)
+        if let data = msg.output_data {
+            let output = String(cString: data)
+            #expect(output == " ", "Leading space in output data must be preserved")
+        }
+        #expect(msg.output_len == 1)
+    }
+}
+
+@Test func testParseOutputPreservesMultipleLeadingSpaces() {
+    // Output data starting with multiple spaces (e.g. indented text).
+    let line = "%output %0    indented"  // delimiter + 3 spaces + "indented"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_OUTPUT)
+        if let data = msg.output_data {
+            let output = String(cString: data)
+            #expect(output == "   indented")
+        }
+        #expect(msg.output_len == 11)
+    }
+}
+
 // MARK: - Window Renamed & Unlinked Window Close Tests
 
 @Test func testParseWindowRenamed() {

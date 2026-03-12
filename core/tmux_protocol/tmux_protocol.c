@@ -108,8 +108,12 @@ static int parse_output(const char *rest, TmuxMessage *msg) {
     const char *id_end = skip_word(p);
     safe_copy(msg->pane_id, TMUX_ID_MAX, p, (size_t)(id_end - p));
 
-    /* The rest is output data (may contain spaces) */
-    p = skip_space(id_end);
+    /* Skip exactly one delimiter space between pane_id and data.
+     * Using skip_space() here would swallow leading spaces that are
+     * part of the actual output (e.g. a shell echoing a space character
+     * produces "%output %0  " — delimiter + one data space). */
+    p = id_end;
+    if (*p == ' ') p++;
     msg->output_data = p;
     msg->output_len  = strlen(p);
 

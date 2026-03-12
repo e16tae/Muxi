@@ -91,6 +91,9 @@ final class ConnectionManager {
     /// The currently active window ID (e.g., "@0").
     private(set) var activeWindowId: String?
 
+    /// Set during a window switch; cleared when the matching `%layout-change` arrives.
+    private(set) var switchingToWindowId: String?
+
     /// The SSH service (exposed for actor-routed channel writes).
     private var sshServiceForWrites: SSHServiceProtocol { sshService }
 
@@ -666,8 +669,19 @@ final class ConnectionManager {
     // MARK: - Window/Session Commands
 
     /// Switch to a specific window by ID.
+    /// Optimistically updates local state and clears panes to show placeholder.
     func selectWindow(_ windowId: String) async throws {
         guard case .attached = state else { return }
+        guard windowId != activeWindowId else { return }
+
+        // Optimistic update
+        switchingToWindowId = windowId
+        activeWindowId = windowId
+        currentPanes = []
+        activePaneId = nil
+        scrolledBackPanes = []
+        paneHasNewOutput = []
+
         try await sendControlCommand(
             "select-window -t \(windowId.shellEscaped())\n", type: .ignored)
     }

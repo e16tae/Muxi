@@ -141,4 +141,41 @@ final class WindowTrackingTests: XCTestCase {
         let manager = makeManager()
         try await manager.selectWindowAndPane(windowId: "@0", paneId: "%0")
     }
+
+    func testSelectWindowOptimisticUpdate() async throws {
+        let manager = makeConnectedManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        try await manager.selectWindow("@1")
+
+        // Optimistic: activeWindowId switches immediately
+        XCTAssertEqual(manager.activeWindowId, "@1")
+        // Panes cleared to trigger placeholder
+        XCTAssertTrue(manager.currentPanes.isEmpty)
+        // activePaneId cleared
+        XCTAssertNil(manager.activePaneId)
+        // Transition flag set
+        XCTAssertEqual(manager.switchingToWindowId, "@1")
+    }
+
+    func testSelectWindowSameWindowIsNoop() async throws {
+        let manager = makeConnectedManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        try await manager.selectWindow("@0")
+
+        // No change — same window
+        XCTAssertEqual(manager.activeWindowId, "@0")
+        XCTAssertEqual(manager.activePaneId, "%0")
+        XCTAssertNil(manager.switchingToWindowId)
+    }
 }

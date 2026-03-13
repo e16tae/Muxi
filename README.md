@@ -2,7 +2,6 @@
 
 > A tmux-focused mobile terminal app with native pane rendering
 
-[![iOS Tests](https://github.com/e16tae/Muxi/actions/workflows/test-ios.yml/badge.svg)](https://github.com/e16tae/Muxi/actions/workflows/test-ios.yml)
 [![Core Tests](https://github.com/e16tae/Muxi/actions/workflows/test-core.yml/badge.svg)](https://github.com/e16tae/Muxi/actions/workflows/test-core.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Swift 5.9](https://img.shields.io/badge/Swift-5.9-orange.svg)](https://swift.org)

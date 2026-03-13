@@ -87,6 +87,7 @@ struct TypographyTokenTests {
         _ = MuxiTokens.Typography.body
         _ = MuxiTokens.Typography.caption
         _ = MuxiTokens.Typography.label
+        _ = MuxiTokens.Typography.monoCaption
     }
 }
 
@@ -99,19 +100,66 @@ struct MotionTokenTests {
         _ = MuxiTokens.Motion.subtle
     }
 
+    @Test func directionalMotionTokensExist() {
+        _ = MuxiTokens.Motion.entrance
+        _ = MuxiTokens.Motion.exit
+    }
+
+    @Test func weightMotionTokensExist() {
+        _ = MuxiTokens.Motion.heavy
+        _ = MuxiTokens.Motion.light
+    }
+
+    @Test func staggerDelayIncreases() {
+        // Each successive child should have a longer delay
+        let delay0 = MuxiTokens.Motion.staggerInterval * 0
+        let delay1 = MuxiTokens.Motion.staggerInterval * 1
+        let delay2 = MuxiTokens.Motion.staggerInterval * 2
+        #expect(delay0 < delay1)
+        #expect(delay1 < delay2)
+    }
+
     @Test func resolvedMotionBothPaths() {
-        // Both paths should produce valid animations without crashing
         let reduced = MuxiTokens.Motion.resolved(reduceMotion: true)
         let normal = MuxiTokens.Motion.resolved(reduceMotion: false)
 
-        // Verify reduced and normal both resolve all properties
+        // Verify all properties resolve without crashing
         _ = reduced.appear
         _ = reduced.tap
         _ = reduced.transition
         _ = reduced.subtle
+        _ = reduced.entrance
+        _ = reduced.exit
+        _ = reduced.heavy
+        _ = reduced.light
         _ = normal.appear
         _ = normal.tap
         _ = normal.transition
         _ = normal.subtle
+        _ = normal.entrance
+        _ = normal.exit
+        _ = normal.heavy
+        _ = normal.light
+    }
+}
+
+@Suite("Design Tokens — Accessibility")
+struct AccessibilityTokenTests {
+    @Test func minimumHitTargetIsAppleCompliant() {
+        #expect(MuxiTokens.Accessibility.minimumHitTarget >= 44)
+    }
+}
+
+@Suite("Design Tokens — ShapeStyle Dot-Syntax")
+struct ShapeStyleTokenTests {
+    @Test func dotSyntaxColorsMatchMuxiTokensColors() {
+        // Verify dot-syntax returns the same colors as MuxiTokens.Colors
+        let dotSurface: Color = .surfaceBase
+        let tokenSurface = MuxiTokens.Colors.surfaceBase
+        let (dr, dg, db) = dotSurface.rgbComponents
+        let (tr, tg, tb) = tokenSurface.rgbComponents
+        #expect(abs(dr - tr) < 0.01)
+        #expect(abs(dg - tg) < 0.01)
+        #expect(abs(db - tb) < 0.01)
     }
 }

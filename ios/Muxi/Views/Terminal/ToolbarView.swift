@@ -37,7 +37,7 @@ struct ToolbarView: View {
         HStack(spacing: MuxiTokens.Spacing.sm) {
             // Session mode toggle
             Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
+                withAnimation(MuxiTokens.Motion.subtle) {
                     isSessionMode.toggle()
                 }
             } label: {

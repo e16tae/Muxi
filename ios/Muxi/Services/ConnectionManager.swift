@@ -81,6 +81,16 @@ final class ConnectionManager {
     func simulateLayoutChange(windowId: String, panes: [TmuxControlService.ParsedPane]) {
         tmuxService.onLayoutChange?(windowId, panes)
     }
+
+    /// Test-only: simulate a `%window-pane-changed` callback.
+    func simulateWindowPaneChanged(windowId: String, paneId: String) {
+        tmuxService.onWindowPaneChanged?(windowId, paneId)
+    }
+
+    /// Test-only: simulate a `%session-window-changed` callback.
+    func simulateSessionWindowChanged(sessionId: String, windowId: String) {
+        tmuxService.onSessionWindowChanged?(sessionId, windowId)
+    }
     #endif
 
     /// The server we are currently connected (or connecting) to.
@@ -1207,9 +1217,23 @@ final class ConnectionManager {
 
         tmuxService.onWindowPaneChanged = { [weak self] windowId, paneId in
             guard let self else { return }
-            // Only update if the event is for the active window.
             guard windowId == self.activeWindowId else { return }
             self.activePaneId = paneId
+        }
+
+        tmuxService.onSessionWindowChanged = { [weak self] sessionId, windowId in
+            guard let self else { return }
+            guard windowId != self.activeWindowId else { return }
+            self.logger.info("Session window changed to \(windowId)")
+            self.prepareWindowSwitch(to: windowId)
+            Task {
+                do {
+                    try await self.forceLayoutRefresh()
+                } catch {
+                    self.logger.error("Failed to refresh layout after session-window-changed: \(error)")
+                }
+                self.requestWindowListRefresh()
+            }
         }
 
         tmuxService.onWindowAdd = { [weak self] windowId in

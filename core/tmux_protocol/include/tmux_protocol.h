@@ -28,6 +28,7 @@
 #define TMUX_MSG_WINDOW_RENAMED        11
 #define TMUX_MSG_UNLINKED_WINDOW_CLOSE 12
 #define TMUX_MSG_WINDOW_PANE_CHANGED   13
+#define TMUX_MSG_SESSION_WINDOW_CHANGED 14
 
 /* ---------- Buffer size constants ---------- */
 #define TMUX_ID_MAX    32

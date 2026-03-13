@@ -63,20 +63,38 @@ enum MuxiTokens {
     // MARK: - Typography
 
     enum Typography {
-        static let largeTitle = Font.system(.title2, weight: .semibold)
-        static let title      = Font.system(.headline, weight: .semibold)
-        static let body       = Font.system(.body)
-        static let caption    = Font.system(.caption)
-        static let label      = Font.system(.footnote, weight: .medium)
+        static let largeTitle  = Font.system(.title2, weight: .semibold)
+        static let title       = Font.system(.headline, weight: .semibold)
+        static let body        = Font.system(.body)
+        static let caption     = Font.system(.caption)
+        static let label       = Font.system(.footnote, weight: .medium)
+        /// Monospaced caption — for command display, code snippets
+        static let monoCaption = Font.system(.caption, design: .monospaced)
     }
 
     // MARK: - Motion
 
     enum Motion {
+        // Semantic tokens — primary API for view animations
         static let appear     = Animation.spring(duration: 0.4, bounce: 0.15)
         static let tap        = Animation.spring(duration: 0.2, bounce: 0.2)
         static let transition = Animation.spring(duration: 0.35, bounce: 0.1)
         static let subtle     = Animation.easeInOut(duration: 0.2)
+
+        // Directional tokens — asymmetric enter/exit
+        static let entrance   = Animation.spring(duration: 0.4, bounce: 0.1)
+        static let exit       = Animation.spring(duration: 0.2, bounce: 0)
+
+        // Weight tokens — element mass
+        static let heavy      = Animation.spring(duration: 0.5, bounce: 0.15)
+        static let light      = Animation.spring(duration: 0.25, bounce: 0)
+
+        // Stagger timing
+        static let staggerInterval: TimeInterval = 0.04
+
+        static func staggerDelay(index: Int) -> Animation {
+            transition.delay(Double(index) * staggerInterval)
+        }
 
         /// Resolved motion set respecting accessibility preferences
         static func resolved(reduceMotion: Bool) -> ResolvedMotion {
@@ -91,6 +109,17 @@ enum MuxiTokens {
         var tap: Animation        { reduceMotion ? .easeInOut(duration: 0.15) : Motion.tap }
         var transition: Animation { reduceMotion ? .easeInOut(duration: 0.2) : Motion.transition }
         var subtle: Animation     { Motion.subtle }
+        var entrance: Animation   { reduceMotion ? .easeInOut(duration: 0.2) : Motion.entrance }
+        var exit: Animation       { reduceMotion ? .easeInOut(duration: 0.15) : Motion.exit }
+        var heavy: Animation      { reduceMotion ? .easeInOut(duration: 0.25) : Motion.heavy }
+        var light: Animation      { reduceMotion ? .easeInOut(duration: 0.15) : Motion.light }
+    }
+
+    // MARK: - Accessibility
+
+    enum Accessibility {
+        /// Minimum touch target size (Apple HIG: 44×44pt)
+        static let minimumHitTarget: CGFloat = 44
     }
 }
 
@@ -116,6 +145,77 @@ extension View {
     ) -> some View {
         modifier(MuxiAnimationModifier(animation: animation, value: value))
     }
+}
+
+// MARK: - ShapeStyle Dot-Syntax
+
+/// Enables `.foregroundStyle(.textPrimary)` instead of `MuxiTokens.Colors.textPrimary`.
+/// Matches SwiftUI's native `.primary` / `.secondary` API ergonomics.
+extension ShapeStyle where Self == Color {
+    // Surface
+    static var surfaceBase: Color     { MuxiTokens.Colors.surfaceBase }
+    static var surfaceDefault: Color  { MuxiTokens.Colors.surfaceDefault }
+    static var surfaceRaised: Color   { MuxiTokens.Colors.surfaceRaised }
+    static var surfaceElevated: Color { MuxiTokens.Colors.surfaceElevated }
+
+    // Accent
+    static var accentDefault: Color   { MuxiTokens.Colors.accentDefault }
+    static var accentBright: Color    { MuxiTokens.Colors.accentBright }
+    static var accentSubtle: Color    { MuxiTokens.Colors.accentSubtle }
+    static var accentMuted: Color     { MuxiTokens.Colors.accentMuted }
+
+    // Text
+    static var textPrimary: Color     { MuxiTokens.Colors.textPrimary }
+    static var textSecondary: Color   { MuxiTokens.Colors.textSecondary }
+    static var textTertiary: Color    { MuxiTokens.Colors.textTertiary }
+    static var textInverse: Color     { MuxiTokens.Colors.textInverse }
+
+    // Border
+    static var borderDefault: Color   { MuxiTokens.Colors.borderDefault }
+    static var borderStrong: Color    { MuxiTokens.Colors.borderStrong }
+    static var borderAccent: Color    { MuxiTokens.Colors.borderAccent }
+
+    // Status
+    static var statusError: Color     { MuxiTokens.Colors.error }
+    static var statusSuccess: Color   { MuxiTokens.Colors.success }
+    static var statusWarning: Color   { MuxiTokens.Colors.warning }
+    static var statusInfo: Color      { MuxiTokens.Colors.info }
+}
+
+// MARK: - EdgeInsets Constants
+
+extension EdgeInsets {
+    /// Toolbar content padding
+    static let toolbar = EdgeInsets(
+        top: MuxiTokens.Spacing.xs,
+        leading: MuxiTokens.Spacing.sm,
+        bottom: MuxiTokens.Spacing.xs,
+        trailing: MuxiTokens.Spacing.sm
+    )
+
+    /// Card-style container padding
+    static let card = EdgeInsets(
+        top: MuxiTokens.Spacing.md,
+        leading: MuxiTokens.Spacing.lg,
+        bottom: MuxiTokens.Spacing.md,
+        trailing: MuxiTokens.Spacing.lg
+    )
+
+    /// Screen-level content padding
+    static let screenContent = EdgeInsets(
+        top: MuxiTokens.Spacing.md,
+        leading: MuxiTokens.Spacing.lg,
+        bottom: MuxiTokens.Spacing.lg,
+        trailing: MuxiTokens.Spacing.lg
+    )
+
+    /// List row padding
+    static let listRow = EdgeInsets(
+        top: MuxiTokens.Spacing.sm,
+        leading: MuxiTokens.Spacing.lg,
+        bottom: MuxiTokens.Spacing.sm,
+        trailing: MuxiTokens.Spacing.lg
+    )
 }
 
 // MARK: - Color Helpers

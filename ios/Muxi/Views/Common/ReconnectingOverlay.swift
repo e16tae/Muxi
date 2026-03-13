@@ -203,7 +203,7 @@ struct TmuxInstallGuideView: View {
                 .foregroundStyle(MuxiTokens.Colors.textSecondary)
 
             Text(command)
-                .font(.system(.caption, design: .monospaced))
+                .font(MuxiTokens.Typography.monoCaption)
                 .padding(MuxiTokens.Spacing.sm)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(

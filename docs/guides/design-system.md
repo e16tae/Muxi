@@ -75,10 +75,13 @@ These are independent. Terminal colors come from the user's selected theme. Mana
 | `body` | body | Content text |
 | `caption` | caption | Secondary info |
 | `label` | footnote, medium | Labels, badges |
+| `monoCaption` | caption, monospaced | Command display, code snippets |
 
 Terminal text uses the bundled monospace font (Sarasa Term K Nerd Font) — not MuxiTokens.Typography.
 
 ### Motion — `MuxiTokens.Motion`
+
+**Semantic tokens** (primary API):
 
 | Token | Animation | Use |
 |-------|-----------|-----|
@@ -87,11 +90,121 @@ Terminal text uses the bundled monospace font (Sarasa Term K Nerd Font) — not 
 | `transition` | spring 0.35s, bounce 0.1 | State change |
 | `subtle` | easeInOut 0.2s | Minor updates |
 
-Use `muxiAnimation(\.appear, value:)` view modifier — automatically respects `accessibilityReduceMotion`.
+**Directional tokens** (asymmetric enter/exit):
+
+| Token | Animation | Use |
+|-------|-----------|-----|
+| `entrance` | spring 0.4s, bounce 0.1 | View appearing (sheets, overlays) |
+| `exit` | spring 0.2s, no bounce | View disappearing |
+
+**Weight tokens** (element mass):
+
+| Token | Animation | Use |
+|-------|-----------|-----|
+| `heavy` | spring 0.5s, bounce 0.15 | Bottom sheets, modals |
+| `light` | spring 0.25s, no bounce | Tooltips, small popovers |
+
+**Stagger timing** for orchestrated reveals:
+
+```swift
+// Stagger child elements at 40ms intervals
+ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+    ItemView(item: item)
+        .animation(MuxiTokens.Motion.staggerDelay(index: index), value: isVisible)
+}
+```
+
+### Accessibility — `MuxiTokens.Accessibility`
+
+| Token | Value | Use |
+|-------|-------|-----|
+| `minimumHitTarget` | 44pt | Minimum touch target (Apple HIG) |
+
+## Dot-Syntax Colors (ShapeStyle Extension)
+
+Preferred API for new code. Uses `extension ShapeStyle where Self == Color` to enable SwiftUI-native dot-syntax:
+
+```swift
+// Preferred — dot-syntax (matches .primary, .secondary)
+Text("Hello")
+    .foregroundStyle(.textPrimary)
+    .background(.surfaceRaised)
+
+// Also valid — explicit enum path
+Text("Hello")
+    .foregroundStyle(MuxiTokens.Colors.textPrimary)
+    .background(MuxiTokens.Colors.surfaceRaised)
+```
+
+Available dot-syntax tokens:
+
+| Category | Tokens |
+|----------|--------|
+| Surface | `.surfaceBase`, `.surfaceDefault`, `.surfaceRaised`, `.surfaceElevated` |
+| Accent | `.accentDefault`, `.accentBright`, `.accentSubtle`, `.accentMuted` |
+| Text | `.textPrimary`, `.textSecondary`, `.textTertiary`, `.textInverse` |
+| Border | `.borderDefault`, `.borderStrong`, `.borderAccent` |
+| Status | `.statusError`, `.statusSuccess`, `.statusWarning`, `.statusInfo` |
+
+## EdgeInsets Constants
+
+Composite padding tokens for consistent component spacing:
+
+```swift
+// Single call with clear intent
+VStack { ... }
+    .padding(.card)      // 12pt vertical, 16pt horizontal
+
+ScrollView { ... }
+    .padding(.screenContent)  // 12pt top, 16pt sides, 16pt bottom
+```
+
+| Token | Top | Leading | Bottom | Trailing | Use |
+|-------|-----|---------|--------|----------|-----|
+| `.toolbar` | 4pt | 8pt | 4pt | 8pt | Toolbar content |
+| `.card` | 12pt | 16pt | 12pt | 16pt | Card containers |
+| `.screenContent` | 12pt | 16pt | 16pt | 16pt | Screen-level content |
+| `.listRow` | 8pt | 16pt | 8pt | 16pt | List rows |
+
+## Motion Patterns
+
+### View Modifier (recommended for `.animation`)
+
+```swift
+// Automatically respects accessibilityReduceMotion
+SomeView()
+    .muxiAnimation(\.appear, value: isVisible)
+```
+
+### withAnimation (for imperative state changes)
+
+```swift
+@Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+// Use ResolvedMotion to respect reduce motion
+withAnimation(MuxiTokens.Motion.resolved(reduceMotion: reduceMotion).subtle) {
+    showPanel.toggle()
+}
+```
+
+### Reduce Motion Behavior
+
+When `accessibilityReduceMotion` is enabled, `ResolvedMotion` substitutes safe crossfade alternatives:
+
+| Normal | Reduce Motion |
+|--------|--------------|
+| spring with bounce | easeInOut (no movement) |
+| entrance (0.4s) | easeInOut (0.2s) |
+| heavy (0.5s) | easeInOut (0.25s) |
+| subtle | unchanged (already safe) |
 
 ## Rules
 
 - Never hardcode color/spacing/radius values in views — always use `MuxiTokens`
+- Prefer dot-syntax (`.textPrimary`) for new code — cleaner and matches SwiftUI conventions
+- Use `MuxiTokens.Motion` tokens for all animations — never scatter bare `.easeInOut` or `.spring` literals
+- Use `muxiAnimation` or `ResolvedMotion` to respect `accessibilityReduceMotion`
+- All interactive elements must meet `Accessibility.minimumHitTarget` (44pt)
 - Terminal area is exempt — uses theme-provided colors
 - Dark-only mode — no light mode token variants exist
 - Adding a new token: add to `MuxiTokens.swift`, update this guide

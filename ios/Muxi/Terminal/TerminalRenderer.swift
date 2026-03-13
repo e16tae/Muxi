@@ -319,7 +319,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         atlasDirty = true
 
         let glyphRowY = Int(atlasNextY)
-        let glyphRowBottom = Int(atlasNextY + cellHeight)
+        let glyphRowBottom = Int(atlasNextY + scaledCellHeight)
         atlasDirtyMinY = min(atlasDirtyMinY, glyphRowY)
         atlasDirtyMaxY = max(atlasDirtyMaxY, glyphRowBottom)
 

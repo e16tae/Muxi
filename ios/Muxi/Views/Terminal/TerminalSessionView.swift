@@ -90,6 +90,7 @@ struct TerminalSessionView: View {
                         updateTerminalSize(geometry.size)
                     }
                 }
+                .padding(.horizontal, MuxiTokens.Spacing.sm)
             }
 
             // Bottom toolbar — always visible

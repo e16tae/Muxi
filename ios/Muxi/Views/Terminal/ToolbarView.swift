@@ -81,6 +81,7 @@ struct ToolbarView: View {
                             activeWindowId: connectionManager.activeWindowId,
                             activePaneId: connectionManager.activePaneId,
                             currentPanes: connectionManager.currentPanes,
+                            isZoomed: connectionManager.isZoomed,
                             onSelectWindow: { windowId in
                                 onSelectWindow?(windowId)
                             },

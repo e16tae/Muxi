@@ -464,6 +464,103 @@ final class WindowTrackingTests: XCTestCase {
         XCTAssertTrue(manager.currentWindows.first(where: { $0.id == "@1" })?.isActive ?? false)
     }
 
+    // MARK: - Zoom State Tests
+
+    func testZoomLayoutChangeSetsIsZoomed() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Zoomed layout-change: only the zoomed pane
+        let zoomedPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: zoomedPanes, isZoomed: true)
+
+        XCTAssertTrue(manager.isZoomed)
+        XCTAssertEqual(manager.currentPanes.count, 1)
+        XCTAssertEqual(manager.activePaneId, "%0")
+    }
+
+    func testUnzoomLayoutChangeClearsIsZoomed() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // First: zoom
+        let zoomedPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: zoomedPanes, isZoomed: true)
+        XCTAssertTrue(manager.isZoomed)
+
+        // Then: unzoom
+        let normalPanes = [
+            TmuxControlService.ParsedPane(x: 0, y: 0, width: 40, height: 24, paneId: 0),
+            TmuxControlService.ParsedPane(x: 41, y: 0, width: 39, height: 24, paneId: 1),
+        ]
+        manager.simulateLayoutChange(windowId: "@0", panes: normalPanes, isZoomed: false)
+
+        XCTAssertFalse(manager.isZoomed)
+        XCTAssertEqual(manager.currentPanes.count, 2)
+    }
+
+    func testNonActiveWindowLayoutChangeDoesNotAffectZoom() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Active window is zoomed
+        let zoomedPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: zoomedPanes, isZoomed: true)
+        XCTAssertTrue(manager.isZoomed)
+
+        // Non-active window's layout-change (isZoomed=false) must NOT clear zoom
+        let otherPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 1)]
+        manager.simulateLayoutChange(windowId: "@1", panes: otherPanes, isZoomed: false)
+        XCTAssertTrue(manager.isZoomed, "Non-active window layout-change must not overwrite zoom state")
+    }
+
+    func testDisconnectClearsIsZoomed() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+        ], activeId: "@0")
+
+        let panes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: panes, isZoomed: true)
+        XCTAssertTrue(manager.isZoomed)
+
+        manager.disconnect()
+        XCTAssertFalse(manager.isZoomed)
+    }
+
+    func testPrepareWindowSwitchClearsIsZoomed() async throws {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        let panes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: panes, isZoomed: true)
+        XCTAssertTrue(manager.isZoomed)
+
+        // Window switch clears zoom
+        try await manager.selectWindow("@1")
+        XCTAssertFalse(manager.isZoomed)
+    }
+
     func testLayoutChangeResolvesTransition() async throws {
         let manager = makeConnectedManager()
         manager.wireCallbacksForTesting()

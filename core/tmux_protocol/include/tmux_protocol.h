@@ -56,6 +56,11 @@ typedef struct {
     const char *layout;               /* points into original line */
     size_t layout_len;
 
+    const char *visible_layout;       /* points into original line */
+    size_t visible_layout_len;
+
+    int is_zoomed;                    /* 1 if '*' zoom flag present */
+
     const char *output_data;          /* points into original line */
     size_t output_len;
 

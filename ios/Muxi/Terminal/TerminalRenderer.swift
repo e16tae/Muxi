@@ -27,6 +27,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
 
     private var font: UIFont
     private var theme: Theme
+    private var scale: CGFloat
 
     // MARK: - Metal State
 
@@ -50,7 +51,11 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     private var atlasWidth: Int = 2048
     private var atlasHeight: Int = 2048
 
-    /// Next available position in the atlas for a new glyph.
+    /// Scaled cell dimensions for atlas bitmap rendering (points * scale).
+    private var scaledCellWidth: CGFloat = 0
+    private var scaledCellHeight: CGFloat = 0
+
+    /// Next available position in the atlas for a new glyph (in scaled pixels).
     private var atlasNextX: CGFloat = 0
     private var atlasNextY: CGFloat = 0
     /// Set to true when new glyphs are added and the texture needs updating.
@@ -118,12 +123,13 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
 
     // MARK: - Init
 
-    init?(device: MTLDevice, font: UIFont, theme: Theme) {
+    init?(device: MTLDevice, font: UIFont, theme: Theme, scale: CGFloat = 1.0) {
         self.device = device
         guard let queue = device.makeCommandQueue() else { return nil }
         self.commandQueue = queue
         self.font = font
         self.theme = theme
+        self.scale = max(scale, 1.0)
         super.init()
 
         measureCellSize()
@@ -174,8 +180,20 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         needsRedraw = true
     }
 
+    var currentScale: CGFloat { scale }
+
     func updateTheme(_ newTheme: Theme) {
         theme = newTheme
+        needsRedraw = true
+    }
+
+    func updateScale(_ newScale: CGFloat) {
+        let clamped = max(newScale, 1.0)
+        guard clamped != scale else { return }
+        scale = clamped
+        glyphUVs.removeAll()
+        setupAtlas()
+        prerenderASCII()
         needsRedraw = true
     }
 
@@ -196,7 +214,11 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     private func setupAtlas() {
         guard cellWidth > 0, cellHeight > 0 else { return }
 
-        let ct = CTFontCreateWithName(font.fontName as CFString, font.pointSize, nil)
+        scaledCellWidth = ceil(cellWidth * scale)
+        scaledCellHeight = ceil(cellHeight * scale)
+
+        let scaledFontSize = font.pointSize * scale
+        let ct = CTFontCreateWithName(font.fontName as CFString, scaledFontSize, nil)
         ctFont = ct
         fontAscent = CTFontGetAscent(ct)
 
@@ -253,16 +275,16 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
 
         // Determine if this is a wide character (CJK, fullwidth, etc.)
         let isWide = isWideCharacter(char)
-        let glyphWidth = isWide ? cellWidth * 2 : cellWidth
+        let glyphWidth = isWide ? scaledCellWidth * 2 : scaledCellWidth
         let cellSpan = isWide ? 2 : 1
 
         // Wrap to the next row if the glyph doesn't fit.
         if atlasNextX + glyphWidth > CGFloat(atlasWidth) {
             atlasNextX = 0
-            atlasNextY += cellHeight
+            atlasNextY += scaledCellHeight
         }
         // Atlas full — cannot add more glyphs.
-        if atlasNextY + cellHeight > CGFloat(atlasHeight) {
+        if atlasNextY + scaledCellHeight > CGFloat(atlasHeight) {
             logger.warning("Glyph atlas full, cannot add '\(String(char))'")
             let fallback = glyphUVs[" "] ?? GlyphUV(u: 0, v: 0, uMax: 0, vMax: 0, cellSpan: 1)
             return fallback
@@ -277,7 +299,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         let line = CTLineCreateWithAttributedString(attrString)
 
         // CG uses bottom-left origin. Position baseline correctly.
-        let drawY = CGFloat(atlasHeight) - atlasNextY - cellHeight + (cellHeight - fontAscent)
+        let drawY = CGFloat(atlasHeight) - atlasNextY - scaledCellHeight + (scaledCellHeight - fontAscent)
 
         ctx.saveGState()
         ctx.setFillColor(UIColor.white.cgColor)
@@ -289,7 +311,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
             u: Float(atlasNextX) / Float(atlasWidth),
             v: Float(atlasNextY) / Float(atlasHeight),
             uMax: Float(atlasNextX + glyphWidth) / Float(atlasWidth),
-            vMax: Float(atlasNextY + cellHeight) / Float(atlasHeight),
+            vMax: Float(atlasNextY + scaledCellHeight) / Float(atlasHeight),
             cellSpan: cellSpan
         )
         glyphUVs[char] = uv

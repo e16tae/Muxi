@@ -59,7 +59,7 @@ fragment float4 terminalFragment(
     VertexOut             in         [[stage_in]],
     texture2d<float>      glyphAtlas [[texture(0)]]
 ) {
-    constexpr sampler textureSampler(mag_filter::linear, min_filter::linear);
+    constexpr sampler textureSampler(mag_filter::nearest, min_filter::nearest);
     float4 texColor = glyphAtlas.sample(textureSampler, in.uv);
 
     // The atlas stores white glyphs on a transparent background.  Use the

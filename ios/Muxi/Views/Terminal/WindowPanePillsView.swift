@@ -12,6 +12,7 @@ struct WindowPanePillsView: View {
     let activeWindowId: String?
     let activePaneId: String?
     let currentPanes: [TmuxControlService.ParsedPane]
+    let isZoomed: Bool
 
     var onSelectWindow: ((String) -> Void)?
     var onSelectWindowAndPane: ((String, String) -> Void)?
@@ -67,23 +68,29 @@ struct WindowPanePillsView: View {
                     .frame(width: 1)
 
                 Menu {
-                    Button("Zoom") {
+                    Button(isZoomed ? "Unzoom" : "Zoom") {
                         onZoomPane?()
                     }
                     Button("Close Pane", role: .destructive) {
                         onClosePane?(paneId)
                     }
                 } label: {
-                    Text("\(index)")
-                        .font(MuxiTokens.Typography.label).fontWeight(.semibold)
-                        .foregroundStyle(isActivePane
-                            ? MuxiTokens.Colors.textInverse
-                            : MuxiTokens.Colors.textTertiary)
-                        .padding(.horizontal, MuxiTokens.Spacing.sm)
-                        .padding(.vertical, MuxiTokens.Spacing.xs)
-                        .background(isActivePane
-                            ? MuxiTokens.Colors.accentDefault
-                            : Color.clear)
+                    HStack(spacing: 2) {
+                        if isActivePane && isZoomed {
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        Text("\(index)")
+                    }
+                    .font(MuxiTokens.Typography.label).fontWeight(.semibold)
+                    .foregroundStyle(isActivePane
+                        ? MuxiTokens.Colors.textInverse
+                        : MuxiTokens.Colors.textTertiary)
+                    .padding(.horizontal, MuxiTokens.Spacing.sm)
+                    .padding(.vertical, MuxiTokens.Spacing.xs)
+                    .background(isActivePane
+                        ? MuxiTokens.Colors.accentDefault
+                        : Color.clear)
                 } primaryAction: {
                     onSelectWindowAndPane?(window.id, paneId)
                 }

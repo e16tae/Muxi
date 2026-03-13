@@ -21,7 +21,7 @@ final class TmuxControlService {
     var onPaneOutput: ((_ paneId: String, _ data: Data) -> Void)?
 
     /// Called when a window's layout changes.
-    var onLayoutChange: ((_ windowId: String, _ panes: [ParsedPane]) -> Void)?
+    var onLayoutChange: ((_ windowId: String, _ panes: [ParsedPane], _ isZoomed: Bool) -> Void)?
 
     /// Called when a new window is added.
     var onWindowAdd: ((_ windowId: String) -> Void)?
@@ -187,20 +187,20 @@ final class TmuxControlService {
 
             case TMUX_MSG_LAYOUT_CHANGE:
                 let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                let isZoomed = msg.is_zoomed != 0
+                // Use visible_layout (shows only the zoomed pane when zoomed).
                 var layoutStr = ""
-                if let ptr = msg.layout, msg.layout_len > 0 {
-                    // Use layout_len to extract only the first layout token
-                    // (tmux sends: <layout> <visible_layout> [*])
+                if let ptr = msg.visible_layout, msg.visible_layout_len > 0 {
                     layoutStr = String(
-                        bytes: UnsafeBufferPointer(start: ptr, count: Int(msg.layout_len))
+                        bytes: UnsafeBufferPointer(start: ptr, count: Int(msg.visible_layout_len))
                             .map { UInt8(bitPattern: $0) },
                         encoding: .utf8
                     ) ?? ""
                 }
-                tmuxLog.info("Layout change: window=\(windowId) layout=\(layoutStr)")
+                tmuxLog.info("Layout change: window=\(windowId) layout=\(layoutStr) zoomed=\(isZoomed)")
                 let panes = parseLayout(layoutStr)
                 tmuxLog.info("Parsed \(panes.count) panes from layout")
-                onLayoutChange?(windowId, panes)
+                onLayoutChange?(windowId, panes, isZoomed)
 
             case TMUX_MSG_WINDOW_ADD:
                 let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))

@@ -1,4 +1,5 @@
 import Testing
+import Foundation
 import CTmuxProtocol
 
 /// Helper to extract a Swift String from a C fixed-size char array.
@@ -42,6 +43,50 @@ private func string(from ptr: UnsafePointer<CChar>) -> String {
             let layoutStr = String(cString: layout)
             #expect(layoutStr == "abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1}")
         }
+        // No visible_layout → falls back to layout
+        #expect(msg.visible_layout == msg.layout)
+        #expect(msg.visible_layout_len == msg.layout_len)
+        #expect(msg.is_zoomed == 0)
+    }
+}
+
+@Test func testParseLayoutChangeWithVisibleLayoutAndZoom() {
+    // Full format: %layout-change @0 <layout> <visible_layout> *
+    let line = "%layout-change @0 abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1} ef01,80x24,0,0,0 *"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_LAYOUT_CHANGE)
+        let windowId = withUnsafePointer(to: &msg.window_id.0) { string(from: $0) }
+        #expect(windowId == "@0")
+
+        // Full layout (first token)
+        #expect(msg.layout != nil)
+        #expect(msg.layout_len > 0)
+
+        // Visible layout (second token) — single pane when zoomed
+        #expect(msg.visible_layout != nil)
+        if let vis = msg.visible_layout {
+            let visData = Data(bytes: vis, count: Int(msg.visible_layout_len))
+            let visStr = String(data: visData, encoding: .utf8) ?? ""
+            #expect(visStr == "ef01,80x24,0,0,0")
+        }
+        #expect(msg.is_zoomed == 1)
+    }
+}
+
+@Test func testParseLayoutChangeWithVisibleLayoutNoZoom() {
+    // visible_layout present but no * flag
+    let line = "%layout-change @0 abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1} ef01,80x24,0,0{40x24,0,0,0,39x24,41,0,1}"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_LAYOUT_CHANGE)
+        #expect(msg.is_zoomed == 0)
+        #expect(msg.visible_layout != nil)
+        #expect(msg.visible_layout != msg.layout)
     }
 }
 

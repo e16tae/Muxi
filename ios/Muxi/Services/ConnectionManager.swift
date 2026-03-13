@@ -78,8 +78,8 @@ final class ConnectionManager {
     }
 
     /// Test-only: simulate a `%layout-change` callback as if tmux sent it.
-    func simulateLayoutChange(windowId: String, panes: [TmuxControlService.ParsedPane]) {
-        tmuxService.onLayoutChange?(windowId, panes)
+    func simulateLayoutChange(windowId: String, panes: [TmuxControlService.ParsedPane], isZoomed: Bool = false) {
+        tmuxService.onLayoutChange?(windowId, panes, isZoomed)
     }
 
     /// Test-only: simulate a `%window-pane-changed` callback.
@@ -117,6 +117,9 @@ final class ConnectionManager {
 
     /// Set during a window switch; cleared when the matching `%layout-change` arrives.
     private(set) var switchingToWindowId: String?
+
+    /// Whether the active pane is currently zoomed (fills entire window).
+    private(set) var isZoomed: Bool = false
 
     /// The SSH service (exposed for actor-routed channel writes).
     private var sshServiceForWrites: SSHServiceProtocol { sshService }
@@ -471,6 +474,7 @@ final class ConnectionManager {
         currentWindows = []
         activeWindowId = nil
         switchingToWindowId = nil
+        isZoomed = false
         scrolledBackPanes = []
         paneHasNewOutput = []
 
@@ -749,6 +753,7 @@ final class ConnectionManager {
         activeWindowId = windowId
         currentPanes = []
         activePaneId = nil
+        isZoomed = false
         scrolledBackPanes = []
         paneHasNewOutput = []
     }
@@ -882,6 +887,7 @@ final class ConnectionManager {
         tmuxService.resetLineBuffer()
         pendingCommands = []
         switchingToWindowId = nil
+        isZoomed = false
 
         for attempt in 1...maxReconnectAttempts {
             reconnectAttempt = attempt
@@ -1130,7 +1136,7 @@ final class ConnectionManager {
             }
         }
 
-        tmuxService.onLayoutChange = { [weak self] windowId, panes in
+        tmuxService.onLayoutChange = { [weak self] windowId, panes, isZoomed in
             guard let self else { return }
             // During a window switch, ignore layout-change from non-target windows.
             if let target = self.switchingToWindowId, windowId != target {
@@ -1152,6 +1158,7 @@ final class ConnectionManager {
                 return
             }
 
+            self.isZoomed = isZoomed
             self.currentPanes = panes
             self.activeWindowId = windowId
             // Mark this window as active in currentWindows
@@ -1340,6 +1347,7 @@ final class ConnectionManager {
             self.currentPanes = []
             self.activePaneId = nil
             self.switchingToWindowId = nil
+            self.isZoomed = false
             self.scrolledBackPanes = []
             self.paneHasNewOutput = []
             self.currentWindows = []

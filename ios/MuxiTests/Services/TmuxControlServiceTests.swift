@@ -62,15 +62,18 @@ final class TmuxControlServiceTests: XCTestCase {
         let service = TmuxControlService()
         var receivedWindowId: String?
         var receivedPanes: [TmuxControlService.ParsedPane]?
+        var receivedIsZoomed: Bool?
 
-        service.onLayoutChange = { windowId, panes in
+        service.onLayoutChange = { windowId, panes, isZoomed in
             receivedWindowId = windowId
             receivedPanes = panes
+            receivedIsZoomed = isZoomed
         }
 
         service.handleLine("%layout-change @0 abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1}")
 
         XCTAssertEqual(receivedWindowId, "@0")
+        XCTAssertEqual(receivedIsZoomed, false)
         XCTAssertNotNil(receivedPanes)
         if let panes = receivedPanes {
             XCTAssertEqual(panes.count, 2)
@@ -82,6 +85,28 @@ final class TmuxControlServiceTests: XCTestCase {
             XCTAssertEqual(panes[1].x, 41)
             XCTAssertEqual(panes[1].paneId, 1)
         }
+    }
+
+    func testHandleLayoutChangeZoomed() {
+        let service = TmuxControlService()
+        var receivedPanes: [TmuxControlService.ParsedPane]?
+        var receivedIsZoomed: Bool?
+
+        service.onLayoutChange = { _, panes, isZoomed in
+            receivedPanes = panes
+            receivedIsZoomed = isZoomed
+        }
+
+        // Zoomed: visible_layout is single pane, * flag present
+        service.handleLine("%layout-change @0 abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1} ef01,80x24,0,0,0 *")
+
+        XCTAssertEqual(receivedIsZoomed, true)
+        XCTAssertNotNil(receivedPanes)
+        // visible_layout is a single pane
+        XCTAssertEqual(receivedPanes?.count, 1)
+        XCTAssertEqual(receivedPanes?.first?.width, 80)
+        XCTAssertEqual(receivedPanes?.first?.height, 24)
+        XCTAssertEqual(receivedPanes?.first?.paneId, 0)
     }
 
     func testHandleWindowAdd() {
@@ -199,7 +224,7 @@ final class TmuxControlServiceTests: XCTestCase {
         var anyCalled = false
 
         service.onPaneOutput = { _, _ in anyCalled = true }
-        service.onLayoutChange = { _, _ in anyCalled = true }
+        service.onLayoutChange = { _, _, _ in anyCalled = true }
         service.onWindowAdd = { _ in anyCalled = true }
         service.onWindowClose = { _ in anyCalled = true }
         service.onWindowRenamed = { _, _ in anyCalled = true }

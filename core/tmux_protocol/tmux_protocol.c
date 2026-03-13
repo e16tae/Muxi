@@ -121,7 +121,7 @@ static int parse_output(const char *rest, TmuxMessage *msg) {
 }
 
 /**
- * Parse %layout-change @<window_id> <layout_string>
+ * Parse %layout-change @<window_id> <layout> [<visible_layout>] [*]
  */
 static int parse_layout_change(const char *rest, TmuxMessage *msg) {
     const char *p = skip_space(rest);
@@ -132,13 +132,30 @@ static int parse_layout_change(const char *rest, TmuxMessage *msg) {
     const char *id_end = skip_word(p);
     safe_copy(msg->window_id, TMUX_ID_MAX, p, (size_t)(id_end - p));
 
-    /* layout string -- first space-delimited token only.
-     * tmux sends: %layout-change @id <layout> <visible_layout> [*]
-     * We only need the first layout token for parsing. */
+    /* First layout token (full layout). */
     p = skip_space(id_end);
     const char *layout_end = skip_word(p);
     msg->layout     = p;
     msg->layout_len = (size_t)(layout_end - p);
+
+    /* Second token: visible_layout (what's actually displayed).
+     * When a pane is zoomed, this contains a single-pane layout.
+     * Falls back to layout if not present. */
+    p = skip_space(layout_end);
+    if (*p != '\0' && *p != '*') {
+        const char *vis_end = skip_word(p);
+        msg->visible_layout     = p;
+        msg->visible_layout_len = (size_t)(vis_end - p);
+        p = skip_space(vis_end);
+    } else {
+        msg->visible_layout     = msg->layout;
+        msg->visible_layout_len = msg->layout_len;
+    }
+
+    /* '*' zoom flag. */
+    if (*p == '*') {
+        msg->is_zoomed = 1;
+    }
 
     return TMUX_MSG_LAYOUT_CHANGE;
 }

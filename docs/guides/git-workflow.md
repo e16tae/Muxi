@@ -67,10 +67,15 @@ ci: add Core C test workflow for pull requests
 1. Create feature branch from `main`
 2. Make focused, atomic commits
 3. Push branch and open PR
-4. Fill out PR template
+4. Fill out PR template — including **Document Governance** checklist
 5. Wait for CI + maintainer review
-6. Squash merge into `main`
-7. Delete branch after merge
+6. Before merge — verify document governance (see `CLAUDE.md` → Document Governance):
+   - `CHANGELOG.md` updated if user-facing change
+   - `ARCHITECTURE.md` updated if data flow, layer, or component changed
+   - ADR drafted if major design decision made
+   - Relevant `docs/guides/` updated if convention changed
+7. Squash merge into `main`
+8. Delete branch after merge
 
 ## Merge Strategy
 

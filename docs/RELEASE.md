@@ -27,10 +27,10 @@ Format: `0.MINOR.PATCH` (e.g., `0.1.0`, `0.2.0`)
 - [ ] All CI checks pass on `main`
 - [ ] All tests pass locally:
   ```bash
+  ./scripts/build-all.sh
   cd ios && xcodegen generate
   xcodebuild test -project Muxi.xcodeproj -scheme Muxi \
-    -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.2' \
-    CODE_SIGNING_ALLOWED=NO
+    -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.2'
   swift test --package-path MuxiCore
   ```
 - [ ] `CHANGELOG.md` updated with new version section

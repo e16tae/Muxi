@@ -42,13 +42,7 @@ Format: `type(scope): description`
 ### Pull Request Process
 
 1. Ensure your code builds without warnings
-2. Run all tests and confirm they pass:
-   ```bash
-   xcodebuild test -project ios/Muxi.xcodeproj -scheme Muxi \
-     -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.2' \
-     CODE_SIGNING_ALLOWED=NO
-   swift test --package-path ios/MuxiCore
-   ```
+2. Run all tests and confirm they pass (see `CLAUDE.md` → Build Commands for exact commands)
 3. Update documentation if your change affects public APIs or behavior
 4. Open a pull request against `main`
 5. Fill out the PR template

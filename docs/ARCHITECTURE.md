@@ -7,12 +7,14 @@ Muxi uses a 4-layer architecture designed for cross-platform code sharing betwee
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │                    UI Layer (SwiftUI)                         │
-│  ServerListView, SessionListView, TerminalView,              │
-│  ExtendedKeyboardView, PaneContainerView, QuickActionView    │
+│  ServerListView, TerminalSessionView, TerminalView,          │
+│  ToolbarView, PlusMenuView, SessionPillsView,                │
+│  WindowPanePillsView, ExtendedKeyboardView, PaneContainerView│
 ├──────────────────────────────────────────────────────────────┤
 │                    App Layer (Swift)                          │
-│  SessionListViewModel, ConnectionManager,                    │
-│  SSHService, TmuxControlService, KeychainService             │
+│  ConnectionManager, SSHService (libssh2 actor),              │
+│  TmuxControlService, KeychainService,                        │
+│  LastSessionStore, ThemeManager                               │
 ├──────────────────────────────────────────────────────────────┤
 │                Bridge Layer (Swift ↔ C)                       │
 │  MuxiCore SPM package — module maps + Swift wrappers         │
@@ -29,8 +31,10 @@ Muxi uses a 4-layer architecture designed for cross-platform code sharing betwee
 Platform-specific SwiftUI views. Responsible for layout, user interaction, and visual presentation.
 
 - **ServerList**: Server browsing and management
-- **SessionList**: tmux session listing and selection
+- **TerminalSession**: Main terminal view with toolbar, session/window/pane pills
 - **Terminal**: `TerminalView` wraps Metal rendering, `PaneContainerView` manages multi-pane layout
+- **Toolbar**: `ToolbarView`, `PlusMenuView` for session/window/pane creation
+- **Navigation pills**: `SessionPillsView`, `WindowPanePillsView` for switching
 - **Common**: Shared UI components (`ErrorBannerView`, `ReconnectingOverlay`)
 - **QuickAction**: One-tap tmux command buttons
 - **ExtendedKeyboard**: Ctrl/Alt/arrow keys overlay
@@ -41,13 +45,14 @@ Business logic, state management, and service coordination.
 
 | Component | Responsibility |
 |-----------|---------------|
-| `SessionListViewModel` | Manages session list state, tmux session CRUD |
-| `ConnectionManager` | SSH lifecycle, auto-reconnect with exponential backoff |
-| `SSHService` | SSH connection abstraction (libssh2 wrapper planned) |
-| `TmuxControlService` | Sends tmux commands, interprets control mode responses |
+| `ConnectionManager` | SSH lifecycle, auto-reconnect, session/window/pane state, tmux command routing |
+| `SSHService` | libssh2 actor — POSIX socket, session, channel management |
+| `TmuxControlService` | Parses tmux control mode output, dispatches structured events |
 | `KeychainService` | Secure credential storage via iOS Keychain |
+| `LastSessionStore` | Persists last-used session per server (UserDefaults) |
+| `ThemeManager` | Terminal color theme management |
 
-All ViewModels use `@MainActor @Observable` (iOS 17+). Services are injected via initializer.
+All ViewModels use `@MainActor @Observable` (iOS 17+). SSHService is a Swift `actor`.
 
 ### Bridge Layer — `ios/MuxiCore/`
 
@@ -75,11 +80,15 @@ Built with CMake for standalone testing and included in SPM via `MuxiCore`.
 ```
 User taps server → ConnectionManager.connect()
   → SSHService.connect(host, port, credentials)
-    → libssh2 session + channel
-  → SSHService.execute("tmux -CC new -A -s muxi")
+    → POSIX socket → libssh2 session + handshake + auth
+  → SSHService.execCommand("tmux -V")  // version check
+  → SSHService.execCommand("tmux list-sessions")
+  → Auto-select session (last-used > first > create new)
+  → SSHService.startShell() → PTY channel
+  → "tmux -CC attach -t <session>"
   → TmuxControlService starts parsing control mode output
     → tmux_protocol parser (C) extracts structured events
-  → SessionListViewModel updates session/window/pane state
+  → ConnectionManager updates session/window/pane state
   → UI re-renders
 ```
 
@@ -87,18 +96,24 @@ User taps server → ConnectionManager.connect()
 
 ```
 SSH channel receives data
+  → TmuxControlService dispatches pane output
   → vt_parser (C) processes escape sequences
-  → TerminalBuffer updates cell grid
-  → TerminalRenderer (Metal) renders glyph atlas
-  → TerminalView displays via MTKView
+    → Including DECTCEM (cursor visibility), DECSCUSR (cursor shape)
+  → TerminalBuffer updates cell grid + cursor state
+  → TerminalRenderer (Metal) renders Retina glyph atlas
+    → Rasterized at contentScaleFactor for sharp text
+    → Cursor shape: block/underline/bar, hollow when unfocused
+  → TerminalView displays via MTKView (on-demand redraw)
 ```
 
 ### Input Flow
 
 ```
 User types on keyboard / extended keyboard
-  → InputHandler translates to terminal sequences
-  → SSHService.send() writes to SSH channel
+  → ASCII: send-keys -t %N <hex bytes>
+  → Non-ASCII (Korean, CJK): send-keys -l -t %N "<literal text>"
+  → Clipboard paste: set-buffer + paste-buffer (tmuxQuoted escaping)
+  → Quick actions: tmux commands via control channel
   → Remote tmux processes input
   → Output flows back via rendering pipeline
 ```
@@ -132,8 +147,9 @@ Muxi/
 ├── ios/                     # iOS application
 │   ├── Muxi/                # App source code
 │   │   ├── App/             # App entry point, ContentView
+│   │   ├── DesignSystem/    # MuxiTokens design system
 │   │   ├── Models/          # Data models (Server, Theme, TmuxModels)
-│   │   ├── Resources/       # Themes (JSON), assets
+│   │   ├── Resources/       # Fonts, themes (JSON), assets
 │   │   ├── Services/        # SSH, tmux, Keychain services
 │   │   ├── Terminal/        # Buffer, renderer, input handler, shaders
 │   │   ├── ViewModels/      # @Observable view models
@@ -141,6 +157,8 @@ Muxi/
 │   ├── MuxiCore/            # SPM package wrapping C core
 │   ├── MuxiTests/           # Unit and integration tests
 │   └── project.yml          # XcodeGen project definition
+├── scripts/                 # Build scripts (build-all.sh, build-openssl.sh, etc.)
+├── vendor/                  # Built xcframeworks (gitignored)
 └── docs/                    # Documentation
 ```
 
@@ -150,6 +168,7 @@ Muxi/
 |----------|-----------|
 | tmux control mode over raw PTY | Structured output enables native pane management |
 | Metal over CoreText | GPU rendering needed for smooth 60fps terminal scrolling |
+| Retina glyph atlas | Rasterize at device scale factor for sharp text on high-DPI |
 | C11 over C++ for core | Simpler FFI, easier JNI bridging, smaller binary |
 | SwiftData over Core Data | Modern API, `@Model` macros, better Swift integration |
 | `@Observable` over `ObservableObject` | iOS 17+ only — simpler, more performant observation |

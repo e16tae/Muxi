@@ -14,16 +14,22 @@ Muxi connects to remote servers via SSH and uses **tmux control mode** (`tmux -C
 
 ## Features
 
+- **Real SSH connections** — libssh2 with password and key authentication
 - **tmux control mode** — Structured session/window/pane management via `tmux -CC`
+- **Session management** — Auto-attach, session switching, create/rename/delete
+- **Window & pane management** — Multi-window support with split panes
 - **Native pane rendering** — Each tmux pane is a dedicated SwiftUI view
-- **Metal GPU rendering** — Glyph atlas-based terminal rendering for smooth scrolling
+- **Metal GPU rendering** — Retina glyph atlas for sharp text at device scale factor
+- **Cursor styles** — Block, underline, bar cursors with blink support (DECSCUSR)
 - **VT100/xterm parser** — Cross-platform C parser for terminal escape sequences
+- **Korean & CJK input** — Native non-ASCII input via `send-keys -l`
+- **Clipboard paste** — Long-press paste with proper tmux escaping
 - **Adaptive layout** — Automatic pane arrangement for phone, tablet, and split screen
 - **Extended keyboard** — Ctrl, Alt, arrow keys, and common shortcuts
 - **Quick actions** — One-tap tmux commands (new window, split, detach)
 - **Server management** — SwiftData persistence with Keychain-secured credentials
 - **Auto-reconnect** — Automatic SSH reconnection with exponential backoff
-- **Error handling** — Non-intrusive banners and reconnection overlays
+- **App lifecycle** — Background detach, foreground reconnect
 
 ## Requirements
 
@@ -40,6 +46,9 @@ Muxi connects to remote servers via SSH and uses **tmux control mode** (`tmux -C
 # Clone the repository
 git clone https://github.com/e16tae/Muxi.git
 cd Muxi
+
+# First-time setup: download fonts + build OpenSSL + libssh2
+./scripts/build-all.sh
 
 # Generate Xcode project
 cd ios && xcodegen generate
@@ -67,16 +76,6 @@ Build and run on an iOS Simulator or device. See [docs/DEVELOPMENT.md](docs/DEVE
 Each layer only communicates with the one directly below it. The Core layer is pure C with no platform dependencies, designed for reuse on Android via JNI.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full architecture deep dive.
-
-## Roadmap
-
-| Version | Focus | Status |
-|---------|-------|--------|
-| **v0.1** | MVP — terminal rendering, tmux control, server management | Current |
-| **v0.2** | Real SSH (libssh2), font bundling, theme settings | Planned |
-| **v0.3** | iPad multitasking, keyboard shortcuts, iCloud sync | Planned |
-| **v1.0** | Stable release, accessibility, localization | Future |
-| **v2.0** | Android version (Jetpack Compose + shared C core) | Future |
 
 ## Contributing
 

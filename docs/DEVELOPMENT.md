@@ -17,6 +17,9 @@
 git clone https://github.com/e16tae/Muxi.git
 cd Muxi
 
+# First-time setup: download fonts + build OpenSSL + libssh2
+./scripts/build-all.sh
+
 # Generate Xcode project
 cd ios && xcodegen generate
 
@@ -24,7 +27,7 @@ cd ios && xcodegen generate
 open Muxi.xcodeproj
 ```
 
-Select an iOS Simulator (iPhone 15 or later recommended) and press **Cmd+R** to build and run.
+Select an iOS Simulator and press **Cmd+R** to build and run. See `CLAUDE.md` → Build Commands for the exact simulator and OS version used in CI.
 
 ## Running Tests
 
@@ -34,8 +37,7 @@ Select an iOS Simulator (iPhone 15 or later recommended) and press **Cmd+R** to 
 xcodebuild test \
   -project ios/Muxi.xcodeproj \
   -scheme Muxi \
-  -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.2' \
-  CODE_SIGNING_ALLOWED=NO
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.2'
 ```
 
 ### Core C Library Tests (via SPM)
@@ -55,13 +57,17 @@ cmake --build core/build
 
 ```
 Muxi/
-├── core/           # Cross-platform C libraries (vt_parser, tmux_protocol)
-├── ios/            # iOS application
-│   ├── Muxi/      # App source
-│   ├── MuxiCore/  # SPM package wrapping C core
-│   ├── MuxiTests/ # Tests
-│   └── project.yml # XcodeGen definition
-└── docs/           # Documentation
+├── core/               # Cross-platform C libraries (vt_parser, tmux_protocol)
+├── ios/                # iOS application
+│   ├── Muxi/          # App source
+│   │   ├── DesignSystem/  # MuxiTokens design system
+│   │   └── ...
+│   ├── MuxiCore/      # SPM package wrapping C core
+│   ├── MuxiTests/     # Tests
+│   └── project.yml    # XcodeGen definition
+├── scripts/            # Build scripts (build-all.sh, build-openssl.sh, etc.)
+├── vendor/             # Built xcframeworks (gitignored)
+└── docs/               # Documentation
 ```
 
 ## XcodeGen
@@ -106,9 +112,13 @@ The C core lives in `core/` and is included in the iOS build via the `MuxiCore` 
 
 Run `xcodegen generate` in the `ios/` directory. The Xcode project must be regenerated.
 
+### Missing xcframeworks / linker errors
+
+Run `./scripts/build-all.sh` from the project root. This downloads fonts and cross-compiles OpenSSL + libssh2 into `vendor/` xcframeworks.
+
 ### Tests fail with signing errors
 
-Add `CODE_SIGNING_ALLOWED=NO` to your `xcodebuild` command. This is already included in the CI workflow.
+Ensure you're running on a simulator, not a device. Simulator builds don't require code signing.
 
 ### Simulator not found
 

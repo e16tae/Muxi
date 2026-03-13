@@ -24,8 +24,14 @@
 
 ## Checklist
 
-- [ ] Code follows project style guides
+- [ ] Code follows project style guides (`docs/guides/`)
 - [ ] No compiler warnings introduced
-- [ ] Documentation updated (if applicable)
-- [ ] CHANGELOG.md updated (for user-facing changes)
 - [ ] No secrets or credentials in code
+
+## Document Governance (see CLAUDE.md)
+
+- [ ] `CHANGELOG.md` updated (for user-facing changes)
+- [ ] `ARCHITECTURE.md` updated (if data flow, layer, or component changed)
+- [ ] ADR drafted in `docs/decisions/` (if major design decision made)
+- [ ] Relevant `docs/guides/` updated (if coding convention changed)
+- [ ] N/A — no documentation impact

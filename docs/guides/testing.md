@@ -86,8 +86,7 @@ int main(void) {
 # iOS app + Swift tests
 cd ios && xcodegen generate
 xcodebuild test -project Muxi.xcodeproj -scheme Muxi \
-  -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.2' \
-  CODE_SIGNING_ALLOWED=NO
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=26.2'
 
 # Core C tests via SPM
 swift test --package-path ios/MuxiCore

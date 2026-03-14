@@ -51,7 +51,8 @@ private func string(from ptr: UnsafePointer<CChar>) -> String {
 }
 
 @Test func testParseLayoutChangeWithVisibleLayoutAndZoom() {
-    // Full format: %layout-change @0 <layout> <visible_layout> *
+    // tmux 3.4: %layout-change @0 <layout> <visible_layout> *
+    // Zoom detected by layout != visible_layout (different content).
     let line = "%layout-change @0 abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1} ef01,80x24,0,0,0 *"
     line.withCString { cLine in
         var msg = TmuxMessage()
@@ -77,8 +78,9 @@ private func string(from ptr: UnsafePointer<CChar>) -> String {
 }
 
 @Test func testParseLayoutChangeWithVisibleLayoutNoZoom() {
-    // visible_layout present but no * flag
-    let line = "%layout-change @0 abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1} ef01,80x24,0,0{40x24,0,0,0,39x24,41,0,1}"
+    // visible_layout present and identical to layout → not zoomed
+    // (tmux sends identical strings when not zoomed)
+    let line = "%layout-change @0 abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1} abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1}"
     line.withCString { cLine in
         var msg = TmuxMessage()
         let msgType = tmux_parse_line(cLine, &msg)
@@ -86,7 +88,44 @@ private func string(from ptr: UnsafePointer<CChar>) -> String {
         #expect(msgType == TMUX_MSG_LAYOUT_CHANGE)
         #expect(msg.is_zoomed == 0)
         #expect(msg.visible_layout != nil)
-        #expect(msg.visible_layout != msg.layout)
+        #expect(msg.visible_layout != msg.layout)  // Different pointers
+    }
+}
+
+@Test func testParseLayoutChangeTmux35CurrentWindowNotZoomed() {
+    // tmux 3.5+: '*' = current window flag, NOT zoom.
+    // layout == visible_layout → not zoomed.
+    let line = "%layout-change @0 abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1} abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1} *"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_LAYOUT_CHANGE)
+        #expect(msg.is_zoomed == 0)
+    }
+}
+
+@Test func testParseLayoutChangeTmux35LastWindowNotZoomed() {
+    // tmux 3.5+: '-' = last window flag, not zoomed.
+    let line = "%layout-change @2 5966,80x24,0,0,17 5966,80x24,0,0,17 -"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_LAYOUT_CHANGE)
+        #expect(msg.is_zoomed == 0)
+    }
+}
+
+@Test func testParseLayoutChangeTmux35ZoomedCurrentWindow() {
+    // tmux 3.5+: '*Z' = current window AND zoomed.
+    let line = "%layout-change @0 abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1} ef01,80x24,0,0,0 *Z"
+    line.withCString { cLine in
+        var msg = TmuxMessage()
+        let msgType = tmux_parse_line(cLine, &msg)
+
+        #expect(msgType == TMUX_MSG_LAYOUT_CHANGE)
+        #expect(msg.is_zoomed == 1)
     }
 }
 

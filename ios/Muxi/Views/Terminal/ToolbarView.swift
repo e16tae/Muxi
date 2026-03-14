@@ -82,6 +82,7 @@ struct ToolbarView: View {
                             activePaneId: connectionManager.activePaneId,
                             currentPanes: connectionManager.currentPanes,
                             isZoomed: connectionManager.isZoomed,
+                            hideZoomToggle: connectionManager.mobileAutoZoom,
                             onSelectWindow: { windowId in
                                 onSelectWindow?(windowId)
                             },

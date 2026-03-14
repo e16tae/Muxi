@@ -527,6 +527,42 @@ final class WindowTrackingTests: XCTestCase {
         XCTAssertTrue(manager.isZoomed, "Non-active window layout-change must not overwrite zoom state")
     }
 
+    func testZoomLayoutChangePreservesPaneIds() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Zoomed layout-change: visible_layout contains only zoomed pane
+        let zoomedPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: zoomedPanes, isZoomed: true)
+
+        XCTAssertTrue(manager.isZoomed)
+        // Pane pills must still show all panes so user can switch
+        XCTAssertEqual(manager.currentWindows[0].paneIds, ["%0", "%1"],
+                       "Zoomed layout must not overwrite full pane list")
+    }
+
+    func testNonActiveWindowZoomPreservesPaneIds() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1", "%2"], isActive: false),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Non-active window gets zoomed layout-change
+        let zoomedPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 1)]
+        manager.simulateLayoutChange(windowId: "@1", panes: zoomedPanes, isZoomed: true)
+
+        // Non-active window's pane list preserved
+        XCTAssertEqual(manager.currentWindows[1].paneIds, ["%1", "%2"],
+                       "Zoomed layout on non-active window must not shrink pane list")
+    }
+
     func testDisconnectClearsIsZoomed() {
         let manager = makeManager()
         manager.wireCallbacksForTesting()
@@ -561,6 +597,250 @@ final class WindowTrackingTests: XCTestCase {
         XCTAssertFalse(manager.isZoomed)
     }
 
+    // MARK: - Mobile Auto-Zoom Tests
+
+    func testMobileAutoZoomSendsZoomOnUnzoomedMultiPane() {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.mobileAutoZoom = true
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+        manager.setPaneBuffersForTesting(["%0": TerminalBuffer(cols: 80, rows: 24)])
+
+        // Unzoomed layout with 2 panes — auto-zoom should suppress layout processing
+        let panes = [
+            TmuxControlService.ParsedPane(x: 0, y: 0, width: 40, height: 24, paneId: 0),
+            TmuxControlService.ParsedPane(x: 41, y: 0, width: 39, height: 24, paneId: 1),
+        ]
+        manager.simulateLayoutChange(windowId: "@0", panes: panes, isZoomed: false)
+
+        // currentPanes should NOT be updated (early return)
+        XCTAssertEqual(manager.currentPanes.count, 0,
+                        "Auto-zoom should skip layout processing")
+        // pendingAutoZoom should be set
+        XCTAssertTrue(manager.pendingAutoZoomForTesting)
+        // Buffer should not be resized to split dimensions
+        XCTAssertEqual(manager.paneBuffers["%0"]?.cols, 80)
+    }
+
+    func testMobileAutoZoomSkipsSinglePane() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.mobileAutoZoom = true
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Unzoomed layout with 1 pane — normal processing
+        let panes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: panes, isZoomed: false)
+
+        // Normal processing: currentPanes updated
+        XCTAssertEqual(manager.currentPanes.count, 1)
+        XCTAssertFalse(manager.pendingAutoZoomForTesting)
+    }
+
+    func testMobileAutoZoomClearedOnZoomedLayout() {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.mobileAutoZoom = true
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+        manager.setPaneBuffersForTesting(["%0": TerminalBuffer(cols: 80, rows: 24)])
+
+        // First: unzoomed multi-pane triggers auto-zoom
+        let unzoomedPanes = [
+            TmuxControlService.ParsedPane(x: 0, y: 0, width: 40, height: 24, paneId: 0),
+            TmuxControlService.ParsedPane(x: 41, y: 0, width: 39, height: 24, paneId: 1),
+        ]
+        manager.simulateLayoutChange(windowId: "@0", panes: unzoomedPanes, isZoomed: false)
+        XCTAssertTrue(manager.pendingAutoZoomForTesting)
+
+        // Then: zoomed layout arrives — should clear pendingAutoZoom and process normally
+        let zoomedPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: zoomedPanes, isZoomed: true)
+
+        XCTAssertFalse(manager.pendingAutoZoomForTesting)
+        XCTAssertTrue(manager.isZoomed)
+        XCTAssertEqual(manager.currentPanes.count, 1)
+    }
+
+    func testMobileAutoZoomPreventsDoubleZoom() {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.mobileAutoZoom = true
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+        manager.setPaneBuffersForTesting(["%0": TerminalBuffer(cols: 80, rows: 24)])
+
+        // First unzoomed layout — sets pendingAutoZoom
+        let panes = [
+            TmuxControlService.ParsedPane(x: 0, y: 0, width: 40, height: 24, paneId: 0),
+            TmuxControlService.ParsedPane(x: 41, y: 0, width: 39, height: 24, paneId: 1),
+        ]
+        manager.simulateLayoutChange(windowId: "@0", panes: panes, isZoomed: false)
+        XCTAssertTrue(manager.pendingAutoZoomForTesting)
+
+        // Second unzoomed layout — should NOT send another command
+        // (pendingAutoZoom is already true)
+        manager.simulateLayoutChange(windowId: "@0", panes: panes, isZoomed: false)
+        XCTAssertTrue(manager.pendingAutoZoomForTesting)
+        // Still no layout processing
+        XCTAssertEqual(manager.currentPanes.count, 0)
+    }
+
+    func testSameWindowPaneSwitchPreservesZoom() async throws {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.mobileAutoZoom = true
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        // Simulate zoomed state
+        let zoomedPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: zoomedPanes, isZoomed: true)
+        XCTAssertTrue(manager.isZoomed)
+
+        // Same-window pane switch uses select-pane -Z (no pendingAutoZoom needed)
+        try await manager.selectWindowAndPane(windowId: "@0", paneId: "%1")
+
+        // select-pane -Z preserves zoom — no pendingAutoZoom dance
+        XCTAssertFalse(manager.pendingAutoZoomForTesting)
+        XCTAssertEqual(manager.activePaneId, "%1")
+    }
+
+    func testSameWindowSamePaneSelectionIsNoop() async throws {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.mobileAutoZoom = true
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.setStateForTesting(.attached(sessionName: "work"))
+        manager.activePaneId = "%0"
+
+        // Simulate zoomed state
+        let zoomedPanes = [TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0)]
+        manager.simulateLayoutChange(windowId: "@0", panes: zoomedPanes, isZoomed: true)
+        XCTAssertTrue(manager.isZoomed)
+
+        // Tap the same active pane — should be a no-op
+        try await manager.selectWindowAndPane(windowId: "@0", paneId: "%0")
+
+        // pendingAutoZoom must NOT be set (no commands sent)
+        XCTAssertFalse(manager.pendingAutoZoomForTesting)
+        // Zoom state preserved
+        XCTAssertTrue(manager.isZoomed)
+        // Active pane unchanged
+        XCTAssertEqual(manager.activePaneId, "%0")
+    }
+
+    func testMobileAutoZoomDisabledNoEffect() {
+        let manager = makeManager()
+        manager.wireCallbacksForTesting()
+        manager.mobileAutoZoom = false  // disabled
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Unzoomed multi-pane layout — should process normally
+        let panes = [
+            TmuxControlService.ParsedPane(x: 0, y: 0, width: 40, height: 24, paneId: 0),
+            TmuxControlService.ParsedPane(x: 41, y: 0, width: 39, height: 24, paneId: 1),
+        ]
+        manager.simulateLayoutChange(windowId: "@0", panes: panes, isZoomed: false)
+
+        // Normal processing happened
+        XCTAssertEqual(manager.currentPanes.count, 2)
+        XCTAssertFalse(manager.pendingAutoZoomForTesting)
+    }
+
+    func testDisconnectClearsPendingAutoZoom() {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.mobileAutoZoom = true
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+        manager.setPaneBuffersForTesting(["%0": TerminalBuffer(cols: 80, rows: 24)])
+
+        // Trigger auto-zoom to set pendingAutoZoom
+        let panes = [
+            TmuxControlService.ParsedPane(x: 0, y: 0, width: 40, height: 24, paneId: 0),
+            TmuxControlService.ParsedPane(x: 41, y: 0, width: 39, height: 24, paneId: 1),
+        ]
+        manager.simulateLayoutChange(windowId: "@0", panes: panes, isZoomed: false)
+        XCTAssertTrue(manager.pendingAutoZoomForTesting)
+
+        manager.disconnect()
+        XCTAssertFalse(manager.pendingAutoZoomForTesting)
+    }
+
+    // MARK: - Proactive Auto-Zoom (didSet) Tests
+
+    func testProactiveAutoZoomOnMobileAutoZoomSet() {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+        manager.setPaneBuffersForTesting(["%0": TerminalBuffer(cols: 80, rows: 24)])
+
+        // Layout arrives before mobileAutoZoom is set (simulating the timing gap)
+        let panes = [
+            TmuxControlService.ParsedPane(x: 0, y: 0, width: 40, height: 24, paneId: 0),
+            TmuxControlService.ParsedPane(x: 41, y: 0, width: 39, height: 24, paneId: 1),
+        ]
+        manager.simulateLayoutChange(windowId: "@0", panes: panes, isZoomed: false)
+        XCTAssertFalse(manager.pendingAutoZoomForTesting, "Should not auto-zoom yet — mobileAutoZoom is false")
+
+        // Now mobileAutoZoom is set (simulating onAppear)
+        manager.mobileAutoZoom = true
+        XCTAssertTrue(manager.pendingAutoZoomForTesting, "didSet should proactively trigger auto-zoom")
+    }
+
+    func testProactiveAutoZoomSkipsSinglePane() {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+        ], activeId: "@0")
+        manager.activePaneId = "%0"
+
+        // Single-pane layout
+        let panes = [
+            TmuxControlService.ParsedPane(x: 0, y: 0, width: 80, height: 24, paneId: 0),
+        ]
+        manager.simulateLayoutChange(windowId: "@0", panes: panes, isZoomed: false)
+
+        manager.mobileAutoZoom = true
+        XCTAssertFalse(manager.pendingAutoZoomForTesting, "Single pane — no auto-zoom needed")
+    }
+
+    func testProactiveAutoZoomSkipsEmptyPanes() {
+        let manager = makeConnectedManager()
+        manager.wireCallbacksForTesting()
+
+        // No layout received yet — currentPanes is empty
+        manager.mobileAutoZoom = true
+        XCTAssertFalse(manager.pendingAutoZoomForTesting, "Empty panes — no auto-zoom needed")
+    }
+
+    // MARK: - Layout Change Transition Tests
+
     func testLayoutChangeResolvesTransition() async throws {
         let manager = makeConnectedManager()
         manager.wireCallbacksForTesting()
@@ -583,5 +863,59 @@ final class WindowTrackingTests: XCTestCase {
         XCTAssertEqual(manager.currentPanes.count, 1)
         XCTAssertEqual(manager.activePaneId, "%1")
         XCTAssertEqual(manager.activeWindowId, "@1")
+    }
+
+    // MARK: - Pane ID Preservation Tests
+
+    func testListWindowsResponsePreservesPaneIds() {
+        let manager = makeManager()
+        // Set up windows with known pane IDs
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%2", "%3"], isActive: false),
+        ], activeId: "@0")
+
+        // Simulate list-windows refresh (e.g., after %window-add).
+        // list-windows response doesn't include pane info.
+        let response = "@0\t0\tbash\t1\n@1\t1\tvim\t0"
+        manager.handleListWindowsResponse(response)
+
+        // Non-active window must preserve its pane IDs
+        XCTAssertEqual(manager.currentWindows[1].paneIds, ["%2", "%3"],
+                       "list-windows must not drop non-active window pane IDs")
+        // Active window also preserved (then overwritten by updateWindowPaneMapping)
+        XCTAssertEqual(manager.currentWindows.count, 2)
+    }
+
+    func testListWindowsResponseDropsPaneIdsForRemovedWindow() {
+        let manager = makeManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+            .init(id: "@1", name: "vim", paneIds: ["%1"], isActive: false),
+            .init(id: "@2", name: "htop", paneIds: ["%2"], isActive: false),
+        ], activeId: "@0")
+
+        // @2 no longer in the list — its pane IDs should not carry over
+        let response = "@0\t0\tbash\t1\n@1\t1\tvim\t0"
+        manager.handleListWindowsResponse(response)
+
+        XCTAssertEqual(manager.currentWindows.count, 2)
+        XCTAssertEqual(manager.currentWindows[1].paneIds, ["%1"])
+    }
+
+    func testListWindowsResponseNewWindowHasEmptyPaneIds() {
+        let manager = makeManager()
+        manager.setWindowsForTesting([
+            .init(id: "@0", name: "bash", paneIds: ["%0"], isActive: true),
+        ], activeId: "@0")
+
+        // @1 is new — no existing pane IDs to preserve
+        let response = "@0\t0\tbash\t1\n@1\t1\tnew-win\t0"
+        manager.handleListWindowsResponse(response)
+
+        XCTAssertEqual(manager.currentWindows.count, 2)
+        XCTAssertEqual(manager.currentWindows[0].paneIds, ["%0"])
+        XCTAssertEqual(manager.currentWindows[1].paneIds, [],
+                       "New windows should have empty pane IDs until list-panes arrives")
     }
 }

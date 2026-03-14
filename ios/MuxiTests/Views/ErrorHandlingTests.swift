@@ -142,9 +142,9 @@ struct ReconnectingOverlayTests {
 @Suite("TmuxInstallGuideView Tests")
 struct TmuxInstallGuideViewTests {
 
-    @Test("Minimum version is 1.8")
+    @Test("Minimum version is 3.2")
     func minimumVersion() {
-        #expect(TmuxInstallGuideView.minimumVersion == "1.8")
+        #expect(TmuxInstallGuideView.minimumVersion == "3.2")
     }
 
     @Test("Reason.notInstalled is equatable")

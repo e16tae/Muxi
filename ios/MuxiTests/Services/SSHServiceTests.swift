@@ -100,6 +100,9 @@ class MockSSHService: SSHServiceProtocol {
     var state: SSHConnectionState = .disconnected
     var mockExecResult: String = ""
 
+    /// Tracks data written to the channel (for verifying tmux commands sent).
+    var writtenData: [Data] = []
+
     /// Per-command overrides. If a command matches a key, that value is returned.
     /// Falls back to `mockExecResult` if no match.
     var mockExecResults: [String: String] = [:]
@@ -138,6 +141,7 @@ class MockSSHService: SSHServiceProtocol {
 
     func writeToChannel(_ data: Data) async throws {
         guard state == .connected else { throw SSHError.notConnected }
+        writtenData.append(data)
     }
 
     func closeShell() async {}

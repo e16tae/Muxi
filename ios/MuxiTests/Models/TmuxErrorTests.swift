@@ -45,24 +45,24 @@ struct TmuxErrorTests {
 
     // MARK: - Version Comparison
 
-    @Test("Version 3.4 meets minimum 1.8")
+    @Test("Version 3.4 meets minimum 3.2")
     func meetsMinimum() {
         #expect(TmuxError.versionMeetsMinimum("3.4"))
     }
 
-    @Test("Version 1.8 meets minimum 1.8")
+    @Test("Version 3.2 meets minimum 3.2")
     func exactMinimum() {
-        #expect(TmuxError.versionMeetsMinimum("1.8"))
+        #expect(TmuxError.versionMeetsMinimum("3.2"))
     }
 
-    @Test("Version 1.7 does not meet minimum 1.8")
+    @Test("Version 3.1 does not meet minimum 3.2")
     func belowMinimum() {
-        #expect(!TmuxError.versionMeetsMinimum("1.7"))
+        #expect(!TmuxError.versionMeetsMinimum("3.1"))
     }
 
-    @Test("Version 1.6 does not meet minimum 1.8")
+    @Test("Version 2.7 does not meet minimum 3.2")
     func wellBelowMinimum() {
-        #expect(!TmuxError.versionMeetsMinimum("1.6"))
+        #expect(!TmuxError.versionMeetsMinimum("2.7"))
     }
 
     @Test("Version 3.3a meets minimum (strips letter suffix)")

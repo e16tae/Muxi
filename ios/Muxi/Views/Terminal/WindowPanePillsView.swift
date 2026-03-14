@@ -13,6 +13,7 @@ struct WindowPanePillsView: View {
     let activePaneId: String?
     let currentPanes: [TmuxControlService.ParsedPane]
     let isZoomed: Bool
+    let hideZoomToggle: Bool
 
     var onSelectWindow: ((String) -> Void)?
     var onSelectWindowAndPane: ((String, String) -> Void)?
@@ -68,20 +69,16 @@ struct WindowPanePillsView: View {
                     .frame(width: 1)
 
                 Menu {
-                    Button(isZoomed ? "Unzoom" : "Zoom") {
-                        onZoomPane?()
+                    if !hideZoomToggle {
+                        Button(isZoomed ? "Unzoom" : "Zoom") {
+                            onZoomPane?()
+                        }
                     }
                     Button("Close Pane", role: .destructive) {
                         onClosePane?(paneId)
                     }
                 } label: {
-                    HStack(spacing: 2) {
-                        if isActivePane && isZoomed {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.system(size: 8, weight: .bold))
-                        }
-                        Text("\(index)")
-                    }
+                    Text("\(index)")
                     .font(MuxiTokens.Typography.label).fontWeight(.semibold)
                     .foregroundStyle(isActivePane
                         ? MuxiTokens.Colors.textInverse

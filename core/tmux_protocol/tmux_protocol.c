@@ -121,7 +121,15 @@ static int parse_output(const char *rest, TmuxMessage *msg) {
 }
 
 /**
- * Parse %layout-change @<window_id> <layout> [<visible_layout>] [*]
+ * Parse %layout-change @<window_id> <layout> <visible_layout> [<flags>]
+ *
+ * Zoom detection: if layout != visible_layout the window is zoomed
+ * (visible_layout shows only the zoomed pane).  Also checks for 'Z'
+ * in trailing flags as a secondary signal.
+ *
+ * NOTE: Some tmux versions send window flags ('*' = current, '-' = last)
+ * after visible_layout.  '*' must NOT be treated as a zoom indicator;
+ * zoom is indicated by 'Z' in the flags or by differing layouts.
  */
 static int parse_layout_change(const char *rest, TmuxMessage *msg) {
     const char *p = skip_space(rest);
@@ -140,7 +148,7 @@ static int parse_layout_change(const char *rest, TmuxMessage *msg) {
 
     /* Second token: visible_layout (what's actually displayed).
      * When a pane is zoomed, this contains a single-pane layout.
-     * Falls back to layout if not present. */
+     * Falls back to layout if not present (pre-3.4 compat). */
     p = skip_space(layout_end);
     if (*p != '\0' && *p != '*') {
         const char *vis_end = skip_word(p);
@@ -152,9 +160,19 @@ static int parse_layout_change(const char *rest, TmuxMessage *msg) {
         msg->visible_layout_len = msg->layout_len;
     }
 
-    /* '*' zoom flag. */
-    if (*p == '*') {
+    /* Zoom detection: layouts differ when zoomed. */
+    if (msg->visible_layout != msg->layout &&
+        (msg->layout_len != msg->visible_layout_len ||
+         memcmp(msg->layout, msg->visible_layout, msg->layout_len) != 0)) {
         msg->is_zoomed = 1;
+    }
+
+    /* Also check for 'Z' flag in trailing window flags (tmux 3.5+). */
+    for (const char *f = p; *f != '\0'; f++) {
+        if (*f == 'Z') {
+            msg->is_zoomed = 1;
+            break;
+        }
     }
 
     return TMUX_MSG_LAYOUT_CHANGE;

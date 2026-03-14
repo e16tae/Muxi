@@ -11,6 +11,8 @@ struct TerminalSessionView: View {
     let sessionName: String
     let themeManager: ThemeManager
 
+    @Environment(\.horizontalSizeClass) private var sizeClass
+
     private let logger = Logger(subsystem: "com.muxi.app", category: "TerminalSession")
     @State private var inputHandler = InputHandler()
     @State private var isKeyboardActive = false
@@ -58,7 +60,7 @@ struct TerminalSessionView: View {
                         ),
                         onPaneTapped: { paneId in
                             isKeyboardActive = true
-                            sendTmuxCommand("select-pane -t \(paneId)")
+                            sendTmuxCommand("select-pane -t \(paneId.shellEscaped()) -Z")
                         },
                         onPaste: { text in
                             pasteToActivePane(text)
@@ -179,6 +181,16 @@ struct TerminalSessionView: View {
             if newValue != nil {
                 isKeyboardActive = true
             }
+        }
+        .onAppear {
+            connectionManager.mobileAutoZoom = (sizeClass == .compact)
+        }
+        .onChange(of: sizeClass) { _, newValue in
+            connectionManager.mobileAutoZoom = (newValue == .compact)
+            // Auto-zoom is triggered proactively by mobileAutoZoom's didSet
+            // when transitioning false→true, and reactively by onLayoutChange
+            // for subsequent layout events.  pendingAutoZoom prevents
+            // double-toggling between the two paths.
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             isKeyboardVisible = true

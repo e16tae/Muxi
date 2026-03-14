@@ -91,6 +91,12 @@ final class ConnectionManager {
     func simulateSessionWindowChanged(sessionId: String, windowId: String) {
         tmuxService.onSessionWindowChanged?(sessionId, windowId)
     }
+
+    /// Test-only: access the private `pendingAutoZoom` guard flag.
+    var pendingAutoZoomForTesting: Bool {
+        get { pendingAutoZoom }
+        set { pendingAutoZoom = newValue }
+    }
     #endif
 
     /// The server we are currently connected (or connecting) to.
@@ -120,6 +126,39 @@ final class ConnectionManager {
 
     /// Whether the active pane is currently zoomed (fills entire window).
     private(set) var isZoomed: Bool = false
+
+    /// When true, auto-zoom fires on any unzoomed multi-pane layout.
+    /// Set by the view layer based on horizontalSizeClass.
+    var mobileAutoZoom: Bool = false {
+        didSet {
+            guard mobileAutoZoom, !oldValue else { return }
+            guard !isZoomed, currentPanes.count > 1, !pendingAutoZoom else { return }
+            logger.debug("Proactive auto-zoom: mobileAutoZoom set with \(self.currentPanes.count) panes")
+            pendingAutoZoom = true
+            Task {
+                try? await self.sendControlCommand("resize-pane -Z\n", type: .ignored)
+            }
+            autoZoomTimeoutTask?.cancel()
+            autoZoomTimeoutTask = Task {
+                try? await Task.sleep(for: .seconds(2))
+                if self.pendingAutoZoom { self.pendingAutoZoom = false }
+            }
+        }
+    }
+
+    /// Guards against duplicate resize-pane -Z commands.
+    /// Set true when auto-zoom command sent; cleared on zoomed %layout-change.
+    private var pendingAutoZoom: Bool = false
+
+    /// Timeout task that clears `pendingAutoZoom` if zoomed `%layout-change`
+    /// never arrives (command failure, network delay). Stored so it can be
+    /// cancelled when the flag is cleared normally.
+    private var autoZoomTimeoutTask: Task<Void, Never>?
+
+    /// Debounced task that sends `list-panes` to refresh pill pane IDs.
+    /// Needed when zoomed — `visible_layout` only shows the zoomed pane,
+    /// so `%layout-change` alone can't update the full pane list.
+    private var paneRefreshTask: Task<Void, Never>?
 
     /// The SSH service (exposed for actor-routed channel writes).
     private var sshServiceForWrites: SSHServiceProtocol { sshService }
@@ -475,6 +514,9 @@ final class ConnectionManager {
         activeWindowId = nil
         switchingToWindowId = nil
         isZoomed = false
+        pendingAutoZoom = false
+        autoZoomTimeoutTask?.cancel()
+        paneRefreshTask?.cancel()
         scrolledBackPanes = []
         paneHasNewOutput = []
 
@@ -738,10 +780,13 @@ final class ConnectionManager {
                 "select-pane -t \(paneId.shellEscaped())\n", type: .ignored)
             try await forceLayoutRefresh()
         } else {
-            // Same-window pane switch — immediate
+            // Same-window pane switch.
+            // -Z preserves zoom state (tmux 3.1+), avoiding the
+            // unzoom→re-zoom dance that caused intermediate layout flicker.
+            guard paneId != activePaneId else { return }
             activePaneId = paneId
             try await sendControlCommand(
-                "select-pane -t \(paneId.shellEscaped())\n", type: .ignored)
+                "select-pane -t \(paneId.shellEscaped()) -Z\n", type: .ignored)
         }
     }
 
@@ -754,6 +799,9 @@ final class ConnectionManager {
         currentPanes = []
         activePaneId = nil
         isZoomed = false
+        pendingAutoZoom = false
+        autoZoomTimeoutTask?.cancel()
+        paneRefreshTask?.cancel()
         scrolledBackPanes = []
         paneHasNewOutput = []
     }
@@ -888,6 +936,9 @@ final class ConnectionManager {
         pendingCommands = []
         switchingToWindowId = nil
         isZoomed = false
+        pendingAutoZoom = false
+        autoZoomTimeoutTask?.cancel()
+        paneRefreshTask?.cancel()
 
         for attempt in 1...maxReconnectAttempts {
             reconnectAttempt = attempt
@@ -1073,14 +1124,23 @@ final class ConnectionManager {
     func handleListWindowsResponse(_ response: String) {
         let parsed = Self.parseWindowList(response)
         if !parsed.isEmpty {
-            currentWindows = parsed
+            // Preserve existing paneIds for windows that carry over.
+            // list-windows doesn't include pane info, so without this
+            // the pills briefly show 0 panes until list-panes arrives.
+            var newWindows = parsed
+            for i in newWindows.indices {
+                if let existing = currentWindows.first(where: { $0.id == newWindows[i].id }) {
+                    newWindows[i].paneIds = existing.paneIds
+                }
+            }
+            currentWindows = newWindows
             // Preserve activeWindowId when the window still exists in the
             // new list.  tmux auto-switches focus on new-window; blindly
             // following that would hijack the app's active window and
             // corrupt pane state via updateWindowPaneMapping.
-            if activeWindowId == nil || !parsed.contains(where: { $0.id == activeWindowId }) {
-                activeWindowId = parsed.first(where: { $0.isActive })?.id
-                    ?? parsed.first?.id
+            if activeWindowId == nil || !newWindows.contains(where: { $0.id == activeWindowId }) {
+                activeWindowId = newWindows.first(where: { $0.isActive })?.id
+                    ?? newWindows.first?.id
             }
             updateWindowPaneMapping()
         }
@@ -1110,12 +1170,29 @@ final class ConnectionManager {
         }
     }
 
+    /// Schedule a debounced `list-panes` refresh for a specific window.
+    /// Used when a zoomed `%layout-change` arrives — `visible_layout`
+    /// only contains the zoomed pane, so the pill pane list may be stale
+    /// after pane additions or removals.
+    private func schedulePaneRefresh(for windowId: String) {
+        paneRefreshTask?.cancel()
+        paneRefreshTask = Task {
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            try? await self.sendControlCommand(
+                "list-panes -t \(windowId.shellEscaped()) -F '#{window_id}\t#{pane_id}'\n",
+                type: .listPanes)
+        }
+    }
+
     /// Sync ``currentPanes`` into the active window's ``TmuxWindowInfo/paneIds``.
     /// Called after ``handleListWindowsResponse`` replaces ``currentWindows``
-    /// (which resets all paneIds to `[]`) so the active window's pane pills
-    /// appear immediately — before the ``list-panes`` response arrives.
+    /// so the active window's pane pills stay current.  Skipped when
+    /// ``currentPanes`` is empty (e.g., during a window transition) to avoid
+    /// overwriting pane IDs that were just preserved from the previous list.
     private func updateWindowPaneMapping() {
-        guard let activeId = activeWindowId,
+        guard !currentPanes.isEmpty,
+              let activeId = activeWindowId,
               let idx = currentWindows.firstIndex(where: { $0.id == activeId })
         else { return }
         currentWindows[idx].paneIds = currentPanes.map { "%\($0.paneId)" }
@@ -1146,16 +1223,54 @@ final class ConnectionManager {
             self.switchingToWindowId = nil
 
             // Only update currentPanes/activeWindowId for the active window.
-            // refresh-client -C can trigger %layout-change for ALL windows;
+            // refresh-client -C can trigger %layout-change for the active window;
             // without this guard, a stale event from a non-active window would
             // hijack focus back after a switch.
             // Allow through when activeWindowId is nil (initial connect).
             guard self.activeWindowId == nil || windowId == self.activeWindowId else {
-                // Still update the window's pane IDs in currentWindows.
-                if let idx = self.currentWindows.firstIndex(where: { $0.id == windowId }) {
+                // Still update the window's pane IDs — but not when zoomed,
+                // since visible_layout would shrink the list to 1 pane.
+                if !isZoomed,
+                   let idx = self.currentWindows.firstIndex(where: { $0.id == windowId }) {
                     self.currentWindows[idx].paneIds = panes.map { "%\($0.paneId)" }
                 }
                 return
+            }
+
+            // Auto-zoom: suppress intermediate unzoomed layout on mobile
+            if self.mobileAutoZoom && !isZoomed && panes.count > 1 {
+                if !self.pendingAutoZoom {
+                    self.pendingAutoZoom = true
+                    // Update window metadata only (pills need pane IDs)
+                    self.activeWindowId = windowId
+                    for i in self.currentWindows.indices {
+                        self.currentWindows[i].isActive = (self.currentWindows[i].id == windowId)
+                    }
+                    if let idx = self.currentWindows.firstIndex(where: { $0.id == windowId }) {
+                        self.currentWindows[idx].paneIds = panes.map { "%\($0.paneId)" }
+                    }
+                    Task {
+                        try? await self.sendControlCommand("resize-pane -Z\n", type: .ignored)
+                    }
+                    // Timeout recovery: if zoomed %layout-change never arrives
+                    // (command failure, network delay), clear the flag so
+                    // subsequent layouts aren't permanently suppressed.
+                    self.autoZoomTimeoutTask?.cancel()
+                    self.autoZoomTimeoutTask = Task {
+                        try? await Task.sleep(for: .seconds(2))
+                        if self.pendingAutoZoom {
+                            self.pendingAutoZoom = false
+                        }
+                    }
+                }
+                return  // Skip pane buffer resize — wait for zoomed layout
+            }
+
+            // Clear guard when zoomed layout arrives
+            if isZoomed {
+                self.logger.debug("Zoomed layout arrived, clearing pendingAutoZoom")
+                self.pendingAutoZoom = false
+                self.autoZoomTimeoutTask?.cancel()
             }
 
             self.isZoomed = isZoomed
@@ -1165,9 +1280,16 @@ final class ConnectionManager {
             for i in self.currentWindows.indices {
                 self.currentWindows[i].isActive = (self.currentWindows[i].id == windowId)
             }
-            // Update pane IDs for this window
-            if let idx = self.currentWindows.firstIndex(where: { $0.id == windowId }) {
-                self.currentWindows[idx].paneIds = panes.map { "%\($0.paneId)" }
+            // Update pane IDs for this window.
+            // When zoomed, visible_layout contains only the zoomed pane —
+            // don't overwrite the full pane list so pills remain selectable.
+            // Instead, request the authoritative pane list (debounced).
+            if !isZoomed {
+                if let idx = self.currentWindows.firstIndex(where: { $0.id == windowId }) {
+                    self.currentWindows[idx].paneIds = panes.map { "%\($0.paneId)" }
+                }
+            } else {
+                self.schedulePaneRefresh(for: windowId)
             }
             // Create TerminalBuffer for any new panes.
             var newPaneIds: [String] = []
@@ -1186,9 +1308,14 @@ final class ConnectionManager {
                 }
             }
             // Remove buffers for panes that no longer exist.
+            // When zoomed, visible_layout only contains the zoomed pane —
+            // don't delete buffers for hidden panes, as tmux still sends
+            // %output for them and we'd lose that data.
             let currentPaneIds = Set(panes.map { "%\($0.paneId)" })
-            for key in self.paneBuffers.keys where !currentPaneIds.contains(key) {
-                self.paneBuffers.removeValue(forKey: key)
+            if !isZoomed {
+                for key in self.paneBuffers.keys where !currentPaneIds.contains(key) {
+                    self.paneBuffers.removeValue(forKey: key)
+                }
             }
             // Update activePaneId: if the current active pane is gone, pick the first new one.
             if let active = self.activePaneId, !currentPaneIds.contains(active) {
@@ -1348,6 +1475,9 @@ final class ConnectionManager {
             self.activePaneId = nil
             self.switchingToWindowId = nil
             self.isZoomed = false
+            self.pendingAutoZoom = false
+            self.autoZoomTimeoutTask?.cancel()
+            self.paneRefreshTask?.cancel()
             self.scrolledBackPanes = []
             self.paneHasNewOutput = []
             self.currentWindows = []

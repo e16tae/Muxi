@@ -1,3 +1,4 @@
+import os
 import SwiftUI
 import UIKit
 
@@ -41,6 +42,12 @@ final class TerminalInputAccessor: UIView, UIKeyInput {
     var hasText: Bool { true }
 
     func insertText(_ text: String) {
+        #if DEBUG
+        if text == "\n" || text == "\r" {
+            let trace = Thread.callStackSymbols.prefix(10).joined(separator: "\n")
+            os_log(.debug, "⚠️ insertText NEWLINE — stack:\n%{public}@", trace)
+        }
+        #endif
         onText?(text)
     }
 

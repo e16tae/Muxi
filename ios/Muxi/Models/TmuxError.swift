@@ -5,11 +5,11 @@ import Foundation
 enum TmuxError: Error, LocalizedError, Equatable {
     /// tmux is not installed on the server (command not found).
     case notInstalled
-    /// tmux is installed but the version is below the minimum (1.8).
+    /// tmux is installed but the version is below the minimum (3.2).
     case versionTooOld(detected: String)
 
     /// The minimum tmux version required by Muxi.
-    static let minimumTmuxVersion = "1.8"
+    static let minimumTmuxVersion = "3.2"
 
     var errorDescription: String? {
         switch self {
@@ -32,7 +32,7 @@ enum TmuxError: Error, LocalizedError, Equatable {
         return version
     }
 
-    /// Check whether a parsed version string meets the minimum (1.8).
+    /// Check whether a parsed version string meets the minimum (3.2).
     ///
     /// Extracts the numeric major.minor from strings like `"3.4"` or
     /// `"3.3a"`, stripping any trailing letter suffix. Returns `false`

@@ -437,4 +437,27 @@ final class TmuxControlServiceTests: XCTestCase {
         XCTAssertEqual(responses.count, 2, "Second response must also arrive")
         XCTAssertEqual(responses[1], "OK")
     }
+
+    // MARK: - Large Chunk Regression
+
+    func testFeedLargeChunkAllLinesDelivered() {
+        let service = TmuxControlService()
+        var addedWindows: [String] = []
+        service.onWindowAdd = { windowId in
+            addedWindows.append(windowId)
+        }
+
+        enterControlMode(service)
+
+        // Build a 50-line payload
+        var payload = ""
+        for i in 0..<50 {
+            payload += "%window-add @\(i)\n"
+        }
+        service.feed(Data(payload.utf8))
+
+        XCTAssertEqual(addedWindows.count, 50)
+        XCTAssertEqual(addedWindows.first, "@0")
+        XCTAssertEqual(addedWindows.last, "@49")
+    }
 }

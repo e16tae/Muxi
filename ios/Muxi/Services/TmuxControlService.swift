@@ -343,16 +343,29 @@ final class TmuxControlService {
     /// by exactly 3 octal digits (e.g. `\033` for ESC, `\134` for `\`).
     /// All other characters are passed through literally.
     static func decodeTmuxOutput(_ escaped: String) -> Data {
-        let utf8 = Array(escaped.utf8)
         var result = Data()
-        result.reserveCapacity(utf8.count)
+        result.reserveCapacity(escaped.utf8.count)
 
-        var i = 0
-        while i < utf8.count {
-            if utf8[i] == UInt8(ascii: "\\"), i + 3 < utf8.count {
-                let d1 = utf8[i + 1]
-                let d2 = utf8[i + 2]
-                let d3 = utf8[i + 3]
+        var iter = escaped.utf8.makeIterator()
+        while let byte = iter.next() {
+            if byte == UInt8(ascii: "\\") {
+                // Peek at next 3 bytes for octal sequence
+                guard let d1 = iter.next() else {
+                    result.append(byte)
+                    break
+                }
+                guard let d2 = iter.next() else {
+                    result.append(byte)
+                    result.append(d1)
+                    break
+                }
+                guard let d3 = iter.next() else {
+                    result.append(byte)
+                    result.append(d1)
+                    result.append(d2)
+                    break
+                }
+
                 if d1 >= UInt8(ascii: "0"), d1 <= UInt8(ascii: "7"),
                    d2 >= UInt8(ascii: "0"), d2 <= UInt8(ascii: "7"),
                    d3 >= UInt8(ascii: "0"), d3 <= UInt8(ascii: "7") {
@@ -360,12 +373,16 @@ final class TmuxControlService {
                               | ((d2 - UInt8(ascii: "0")) << 3)
                               | (d3 - UInt8(ascii: "0"))
                     result.append(value)
-                    i += 4
-                    continue
+                } else {
+                    // Not a valid octal triple — emit all 4 bytes literally
+                    result.append(byte)
+                    result.append(d1)
+                    result.append(d2)
+                    result.append(d3)
                 }
+            } else {
+                result.append(byte)
             }
-            result.append(utf8[i])
-            i += 1
         }
 
         return result

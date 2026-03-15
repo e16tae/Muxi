@@ -438,6 +438,38 @@ final class TmuxControlServiceTests: XCTestCase {
         XCTAssertEqual(responses[1], "OK")
     }
 
+    // MARK: - Octal Decode
+
+    func testDecodeTmuxOutputPlainText() {
+        let result = TmuxControlService.decodeTmuxOutput("Hello world")
+        XCTAssertEqual(result, Data("Hello world".utf8))
+    }
+
+    func testDecodeTmuxOutputEscapeSequence() {
+        // \033 = ESC (0x1B), \012 = newline (0x0A)
+        let result = TmuxControlService.decodeTmuxOutput("\\033[31mRed\\012")
+        XCTAssertEqual(result[0], 0x1B) // ESC
+        XCTAssertEqual(result[4], 0x6D) // 'm'
+        XCTAssertEqual(result[result.count - 1], 0x0A) // newline
+    }
+
+    func testDecodeTmuxOutputBackslash() {
+        // \134 = backslash (0x5C)
+        let result = TmuxControlService.decodeTmuxOutput("path\\134file")
+        XCTAssertEqual(String(data: result, encoding: .utf8), "path\\file")
+    }
+
+    func testDecodeTmuxOutputEmptyString() {
+        let result = TmuxControlService.decodeTmuxOutput("")
+        XCTAssertTrue(result.isEmpty)
+    }
+
+    func testDecodeTmuxOutputTrailingBackslash() {
+        // Backslash at end without 3 octal digits — should be literal
+        let result = TmuxControlService.decodeTmuxOutput("end\\")
+        XCTAssertEqual(result, Data("end\\".utf8))
+    }
+
     // MARK: - Large Chunk Regression
 
     func testFeedLargeChunkAllLinesDelivered() {

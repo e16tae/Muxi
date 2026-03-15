@@ -136,6 +136,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         buildPipeline()
         setupAtlas()
         prerenderASCII()
+        prerenderCommonGlyphs()
     }
 
     deinit {
@@ -176,6 +177,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         glyphUVs.removeAll()
         setupAtlas()
         prerenderASCII()
+        prerenderCommonGlyphs()
         ringBufferCapacity = 0  // Force ring buffer reallocation on next rebuild.
         needsRedraw = true
     }
@@ -194,6 +196,7 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
         glyphUVs.removeAll()
         setupAtlas()
         prerenderASCII()
+        prerenderCommonGlyphs()
         needsRedraw = true
     }
 
@@ -256,6 +259,30 @@ final class TerminalRenderer: NSObject, MTKViewDelegate {
     private func prerenderASCII() {
         for code in 32...126 {
             let ch = Character(UnicodeScalar(code)!)
+            _ = ensureGlyph(ch)
+        }
+        flushAtlasToTexture()
+    }
+
+    /// Pre-render frequently-used non-ASCII glyphs: Korean consonants/vowels,
+    /// representative syllables, box-drawing, and block elements.
+    /// Adds ~25ms to init but eliminates cold-start jank for Korean terminals.
+    private func prerenderCommonGlyphs() {
+        // Korean Jamo (consonants + vowels)
+        let jamo = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
+                 + "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ"
+        // Representative Korean syllables (high-frequency)
+        let syllables = "가나다라마바사아자차카타파하"
+                      + "개내대래매배새애재채캐태패해"
+                      + "고노도로모보소오조초코토포호"
+                      + "구누두루무부수우주추쿠투푸후"
+                      + "기니디리미비시이지치키티피히"
+                      + "을를의에서는한이가의로에"
+        // Box-drawing and block elements (common in TUI apps like htop, tmux borders)
+        let boxDrawing = "─│┌┐└┘├┤┬┴┼━┃╔╗╚╝╠╣╦╩╬║═"
+                       + "▀▁▂▃▄▅▆▇█▉▊▋▌▍▎▏░▒▓"
+
+        for ch in jamo + syllables + boxDrawing {
             _ = ensureGlyph(ch)
         }
         flushAtlasToTexture()

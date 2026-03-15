@@ -56,7 +56,7 @@ final class TmuxControlService {
     // MARK: - ParsedPane
 
     /// A single leaf pane extracted from a tmux layout string.
-    struct ParsedPane {
+    struct ParsedPane: Equatable {
         let x: Int
         let y: Int
         let width: Int

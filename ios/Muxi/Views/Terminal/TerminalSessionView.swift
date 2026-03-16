@@ -16,8 +16,7 @@ struct TerminalSessionView: View {
     private let logger = Logger(subsystem: "com.muxi.app", category: "TerminalSession")
     @State private var inputHandler = InputHandler()
     @State private var isKeyboardActive = false
-    @State private var scrollbackState: [String: ScrollbackState] = [:]
-    @State private var scrollbackCaches: [String: TerminalBuffer] = [:]
+    @State private var scrollbackManager = ScrollbackManager()
     @State private var showNewSessionAlert = false
     @State private var newSessionName = ""
     @State private var isKeyboardVisible = false
@@ -26,8 +25,9 @@ struct TerminalSessionView: View {
     @State private var renameTarget: ToolbarView.RenameTarget?
     @State private var renameText = ""
 
-    /// Build pane info from ConnectionManager's live pane data.
-    private var panes: [PaneContainerView.PaneInfo] {
+    @State private var panes: [PaneContainerView.PaneInfo] = []
+
+    private func buildPaneInfos() -> [PaneContainerView.PaneInfo] {
         connectionManager.currentPanes.map { parsedPane in
             let paneId = "%\(parsedPane.paneId)"
             let buffer = connectionManager.paneBuffers[paneId]
@@ -43,135 +43,162 @@ struct TerminalSessionView: View {
         }
     }
 
-    var body: some View {
-        VStack(spacing: 0) {
-            // Terminal content — edge to edge from top
-            if panes.isEmpty {
-                placeholderView
-            } else {
-                GeometryReader { geometry in
-                    PaneContainerView(
-                        panes: panes,
-                        theme: themeManager.currentTheme,
-                        fontSize: themeManager.fontSize,
-                        activePaneId: Binding(
-                            get: { connectionManager.activePaneId },
-                            set: { connectionManager.activePaneId = $0 }
-                        ),
-                        onPaneTapped: { paneId in
-                            isKeyboardActive = true
-                            sendTmuxCommand("select-pane -t \(paneId.shellEscaped()) -Z")
-                        },
-                        onPaste: { text in
-                            pasteToActivePane(text)
-                        },
-                        scrollbackBuffer: connectionManager.activePaneId.flatMap { scrollbackCaches[$0] },
-                        scrollbackOffset: connectionManager.activePaneId.flatMap {
-                            if case .scrolling(let offset, _) = scrollbackState[$0] {
-                                return offset
-                            }
-                            return nil
-                        } ?? 0,
-                        onScrollOffsetChanged: { paneId, delta in
-                            handleScrollDelta(paneId: paneId, delta: delta)
-                        },
-                        showNewOutputIndicator: connectionManager.activePaneId.map {
-                            connectionManager.paneHasNewOutput.contains($0)
-                        } ?? false,
-                        onReturnToLive: { paneId in
-                            returnToLive(paneId: paneId)
-                        }
-                    )
-                    .onChange(of: geometry.size) { _, newSize in
-                        updateTerminalSize(newSize)
-                    }
-                    .onChange(of: themeManager.fontSize) { _, _ in
-                        updateTerminalSize(geometry.size)
-                    }
-                    .onAppear {
-                        updateTerminalSize(geometry.size)
-                    }
-                }
-                .padding(.horizontal, MuxiTokens.Spacing.sm)
-            }
+    /// The scrollback cache for the active pane, if any.
+    private var activeScrollbackBuffer: TerminalBuffer? {
+        guard let id = connectionManager.activePaneId else { return nil }
+        return scrollbackManager.cache(for: id)
+    }
 
-            // Bottom toolbar — always visible
-            ToolbarView(
-                connectionManager: connectionManager,
-                sessionName: sessionName,
-                isKeyboardActive: $isKeyboardActive,
-                isSessionMode: $isSessionMode,
-                showRenameAlert: $showRenameAlert,
-                renameTarget: $renameTarget,
-                renameText: $renameText,
-                onSendCommand: { command in
-                    sendTmuxCommand(command)
-                },
-                onSelectWindow: { windowId in
-                    Task {
-                        try? await connectionManager.selectWindow(windowId)
-                    }
-                },
-                onSelectWindowAndPane: { windowId, paneId in
-                    isKeyboardActive = true
-                    Task {
-                        try? await connectionManager.selectWindowAndPane(
-                            windowId: windowId, paneId: paneId)
-                    }
-                },
-                onNewSession: {
-                    showNewSessionAlert = true
-                },
-                onSwitchSession: { name in
-                    Task {
-                        do {
-                            try await connectionManager.switchSession(to: name)
-                            logger.info("Switched to session: \(name)")
-                        } catch {
-                            logger.error("Failed to switch: \(error.localizedDescription)")
-                        }
-                    }
-                },
-                onKillSession: { name in
-                    Task {
-                        try? await connectionManager.killSession(name)
-                    }
-                }
-            )
+    /// The current scrollback offset for the active pane (0 = live).
+    private var activeScrollbackOffset: Int {
+        guard let id = connectionManager.activePaneId else { return 0 }
+        if case .scrolling(let offset, _) = scrollbackManager.state(for: id) {
+            return offset
+        }
+        return 0
+    }
 
-            // Extended keyboard — visible only with keyboard
-            if isKeyboardVisible {
-                ExtendedKeyboardView(
+    /// Whether the active pane has new output while scrolled back.
+    private var activeHasNewOutput: Bool {
+        guard let id = connectionManager.activePaneId else { return false }
+        return connectionManager.paneHasNewOutput.contains(id)
+    }
+
+    // MARK: - Body Subsections
+
+    @ViewBuilder
+    private var terminalContentArea: some View {
+        if panes.isEmpty {
+            placeholderView
+        } else {
+            GeometryReader { geometry in
+                PaneContainerView(
+                    panes: panes,
                     theme: themeManager.currentTheme,
-                    inputHandler: inputHandler,
-                    onInput: { data in
-                        sendToActivePane(data)
+                    fontSize: themeManager.fontSize,
+                    activePaneId: Binding(
+                        get: { connectionManager.activePaneId },
+                        set: { connectionManager.activePaneId = $0 }
+                    ),
+                    onPaneTapped: { paneId in
+                        isKeyboardActive = true
+                        sendTmuxCommand("select-pane -t \(paneId.shellEscaped()) -Z")
+                    },
+                    onPaste: { text in
+                        pasteToActivePane(text)
+                    },
+                    scrollbackBuffer: activeScrollbackBuffer,
+                    scrollbackOffset: activeScrollbackOffset,
+                    onScrollOffsetChanged: { paneId, delta in
+                        handleScrollDelta(paneId: paneId, delta: delta)
+                    },
+                    showNewOutputIndicator: activeHasNewOutput,
+                    onReturnToLive: { paneId in
+                        returnToLive(paneId: paneId)
                     }
                 )
+                .onChange(of: geometry.size) { _, newSize in
+                    updateTerminalSize(newSize)
+                }
+                .onChange(of: themeManager.fontSize) { _, _ in
+                    updateTerminalSize(geometry.size)
+                }
+                .onAppear {
+                    updateTerminalSize(geometry.size)
+                }
             }
+            .padding(.horizontal, MuxiTokens.Spacing.sm)
+        }
+    }
 
-            // Hidden input view
-            TerminalInputView(
-                onText: { text in
-                    for char in text {
-                        let data = inputHandler.data(for: char)
-                        sendToActivePane(data)
+    private var toolbarArea: some View {
+        ToolbarView(
+            connectionManager: connectionManager,
+            sessionName: sessionName,
+            isKeyboardActive: $isKeyboardActive,
+            isSessionMode: $isSessionMode,
+            showRenameAlert: $showRenameAlert,
+            renameTarget: $renameTarget,
+            renameText: $renameText,
+            onSendCommand: { command in
+                sendTmuxCommand(command)
+            },
+            onSelectWindow: { windowId in
+                Task {
+                    try? await connectionManager.selectWindow(windowId)
+                }
+            },
+            onSelectWindowAndPane: { windowId, paneId in
+                isKeyboardActive = true
+                Task {
+                    try? await connectionManager.selectWindowAndPane(
+                        windowId: windowId, paneId: paneId)
+                }
+            },
+            onNewSession: {
+                showNewSessionAlert = true
+            },
+            onSwitchSession: { name in
+                Task {
+                    do {
+                        try await connectionManager.switchSession(to: name)
+                        logger.info("Switched to session: \(name)")
+                    } catch {
+                        logger.error("Failed to switch: \(error.localizedDescription)")
                     }
-                },
-                onDelete: {
-                    sendToActivePane(Data([0x7F]))
-                },
-                onSpecialKey: { key in
-                    let data = inputHandler.data(for: key)
+                }
+            },
+            onKillSession: { name in
+                Task {
+                    try? await connectionManager.killSession(name)
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    private var keyboardArea: some View {
+        if isKeyboardVisible {
+            ExtendedKeyboardView(
+                theme: themeManager.currentTheme,
+                inputHandler: inputHandler,
+                onInput: { data in
                     sendToActivePane(data)
-                },
-                onRawData: { data in
-                    sendToActivePane(data)
-                },
-                isActive: $isKeyboardActive
+                }
             )
-            .frame(width: 1, height: 1)
-            .opacity(0)
+        }
+    }
+
+    private var hiddenInputArea: some View {
+        TerminalInputView(
+            onText: { text in
+                for char in text {
+                    let data = inputHandler.data(for: char)
+                    sendToActivePane(data)
+                }
+            },
+            onDelete: {
+                sendToActivePane(Data([0x7F]))
+            },
+            onSpecialKey: { key in
+                let data = inputHandler.data(for: key)
+                sendToActivePane(data)
+            },
+            onRawData: { data in
+                sendToActivePane(data)
+            },
+            isActive: $isKeyboardActive
+        )
+        .frame(width: 1, height: 1)
+        .opacity(0)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            terminalContentArea
+            toolbarArea
+            keyboardArea
+            hiddenInputArea
         }
         .background(
             themeManager.currentTheme.background.color
@@ -184,6 +211,7 @@ struct TerminalSessionView: View {
         }
         .onAppear {
             connectionManager.mobileAutoZoom = (sizeClass == .compact)
+            panes = buildPaneInfos()
         }
         .onChange(of: sizeClass) { _, newValue in
             connectionManager.mobileAutoZoom = (newValue == .compact)
@@ -191,6 +219,9 @@ struct TerminalSessionView: View {
             // when transitioning false→true, and reactively by onLayoutChange
             // for subsequent layout events.  pendingAutoZoom prevents
             // double-toggling between the two paths.
+        }
+        .onChange(of: connectionManager.currentPanes) { _, _ in
+            panes = buildPaneInfos()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
             isKeyboardVisible = true
@@ -271,7 +302,7 @@ struct TerminalSessionView: View {
         connectionManager.resizeTerminal(cols: cols, rows: rows)
 
         // Exit scrollback on resize — terminal content reflows.
-        let scrolledPanes = scrollbackState.filter { $0.value != .live }.map(\.key)
+        let scrolledPanes = scrollbackManager.scrolledPaneIds
         for paneId in scrolledPanes {
             returnToLive(paneId: paneId)
         }
@@ -351,7 +382,7 @@ struct TerminalSessionView: View {
     // MARK: - Scrollback
 
     private func handleScrollDelta(paneId: String, delta: Int) {
-        let currentState = scrollbackState[paneId] ?? .live
+        let currentState = scrollbackManager.state(for: paneId)
 
         switch currentState {
         case .live where delta > 0:
@@ -366,9 +397,7 @@ struct TerminalSessionView: View {
             if newOffset == 0 {
                 returnToLive(paneId: paneId)
             } else {
-                scrollbackState[paneId] = .scrolling(
-                    offset: newOffset, totalLines: totalLines
-                )
+                scrollbackManager.updateOffset(paneId: paneId, offset: newOffset, totalLines: totalLines)
                 // Fetch more history when user reaches the top of the cache.
                 let maxOffset = totalLines - visibleRows
                 if newOffset >= maxOffset && totalLines < 2000 {
@@ -382,15 +411,15 @@ struct TerminalSessionView: View {
     }
 
     private func fetchScrollbackIfNeeded(paneId: String) {
-        guard scrollbackState[paneId] != .loading else { return }
-        scrollbackState[paneId] = .loading
+        guard scrollbackManager.state(for: paneId) != .loading else { return }
+        scrollbackManager.setLoading(paneId: paneId)
         connectionManager.scrolledBackPanes.insert(paneId)
 
         Task {
             do {
                 let response = try await connectionManager.fetchScrollback(paneId: paneId)
                 guard !response.isEmpty else {
-                    scrollbackState[paneId] = .live
+                    scrollbackManager.returnToLive(paneId: paneId)
                     connectionManager.scrolledBackPanes.remove(paneId)
                     return
                 }
@@ -408,13 +437,10 @@ struct TerminalSessionView: View {
                 let normalized = response.replacingOccurrences(of: "\n", with: "\r\n")
                 cacheBuffer.feed(normalized)
 
-                scrollbackCaches[paneId] = cacheBuffer
-                scrollbackState[paneId] = .scrolling(
-                    offset: 1, totalLines: totalLines
-                )
+                scrollbackManager.setScrolling(paneId: paneId, offset: 1, totalLines: totalLines, cache: cacheBuffer)
             } catch {
                 logger.error("Scrollback fetch failed: \(error.localizedDescription)")
-                scrollbackState[paneId] = .live
+                scrollbackManager.returnToLive(paneId: paneId)
                 connectionManager.scrolledBackPanes.remove(paneId)
             }
         }
@@ -449,17 +475,14 @@ struct TerminalSessionView: View {
 
                 // Preserve user's scroll position relative to the bottom.
                 let previousOffset: Int
-                if case .scrolling(let offset, _) = scrollbackState[paneId] {
+                if case .scrolling(let offset, _) = scrollbackManager.state(for: paneId) {
                     previousOffset = offset
                 } else {
                     previousOffset = 1
                 }
                 let addedLines = totalLines - currentTotal
 
-                scrollbackCaches[paneId] = cacheBuffer
-                scrollbackState[paneId] = .scrolling(
-                    offset: previousOffset + addedLines, totalLines: totalLines
-                )
+                scrollbackManager.setScrolling(paneId: paneId, offset: previousOffset + addedLines, totalLines: totalLines, cache: cacheBuffer)
             } catch {
                 logger.error("Fetch more scrollback failed: \(error.localizedDescription)")
             }
@@ -467,8 +490,7 @@ struct TerminalSessionView: View {
     }
 
     private func returnToLive(paneId: String) {
-        scrollbackState[paneId] = .live
-        scrollbackCaches[paneId] = nil
+        scrollbackManager.returnToLive(paneId: paneId)
         connectionManager.scrolledBackPanes.remove(paneId)
         connectionManager.paneHasNewOutput.remove(paneId)
     }

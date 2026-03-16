@@ -56,7 +56,7 @@ final class TmuxControlService {
     // MARK: - ParsedPane
 
     /// A single leaf pane extracted from a tmux layout string.
-    struct ParsedPane {
+    struct ParsedPane: Equatable {
         let x: Int
         let y: Int
         let width: Int
@@ -67,6 +67,7 @@ final class TmuxControlService {
     // MARK: - Line Accumulator
 
     private var lineBuffer = Data()
+    private var scanStart = 0
 
     /// Whether we have entered tmux control mode (seen the DCS prefix).
     /// Lines before this point are shell output and should be ignored.
@@ -88,31 +89,31 @@ final class TmuxControlService {
     func feed(_ data: Data) {
         lineBuffer.append(data)
 
-        // Split on \n (0x0A), processing each complete line
-        while let newlineIndex = lineBuffer.firstIndex(of: 0x0A) {
-            var lineData = lineBuffer[lineBuffer.startIndex..<newlineIndex]
-            lineBuffer = Data(lineBuffer[(newlineIndex + 1)...])
-
-            // Strip trailing \r (PTY adds CRLF translation)
-            if lineData.last == 0x0D {
-                lineData = lineData.dropLast()
+        while scanStart < lineBuffer.count {
+            guard let newlineIndex = lineBuffer[scanStart...].firstIndex(of: 0x0A) else {
+                break
             }
 
-            // Detect DCS prefix (ESC P ... 1000p) that marks tmux control
-            // mode start.  Strip everything up to and including the marker
-            // so the embedded %begin is properly parsed.
+            var lineEnd = newlineIndex
+            // Strip trailing \r (PTY adds CRLF translation)
+            if lineEnd > scanStart && lineBuffer[lineEnd - 1] == 0x0D {
+                lineEnd -= 1
+            }
+
+            let lineData = lineBuffer[scanStart..<lineEnd]
+            scanStart = newlineIndex + 1
+
+            // Detect DCS prefix that marks tmux control mode start.
             if !inControlMode {
                 if let line = String(data: lineData, encoding: .utf8),
                    let range = line.range(of: "\u{1B}P1000p") {
                     inControlMode = true
                     let remainder = String(line[range.upperBound...])
-                    tmuxLog.info("DCS detected — entering control mode")
                     if !remainder.isEmpty {
                         handleLine(remainder)
                     }
                     continue
                 }
-                // Not yet in control mode — skip shell output
                 continue
             }
 
@@ -120,11 +121,18 @@ final class TmuxControlService {
                 handleLine(line)
             }
         }
+
+        // Compact buffer when consumed portion exceeds 64KB
+        if scanStart > 65536 {
+            lineBuffer.removeSubrange(..<scanStart)
+            scanStart = 0
+        }
     }
 
     /// Reset the line buffer (call on disconnect/reconnect).
     func resetLineBuffer() {
         lineBuffer = Data()
+        scanStart = 0
         inControlMode = false
         inResponseBlock = false
         responseLines = []
@@ -335,16 +343,29 @@ final class TmuxControlService {
     /// by exactly 3 octal digits (e.g. `\033` for ESC, `\134` for `\`).
     /// All other characters are passed through literally.
     static func decodeTmuxOutput(_ escaped: String) -> Data {
-        let utf8 = Array(escaped.utf8)
         var result = Data()
-        result.reserveCapacity(utf8.count)
+        result.reserveCapacity(escaped.utf8.count)
 
-        var i = 0
-        while i < utf8.count {
-            if utf8[i] == UInt8(ascii: "\\"), i + 3 < utf8.count {
-                let d1 = utf8[i + 1]
-                let d2 = utf8[i + 2]
-                let d3 = utf8[i + 3]
+        var iter = escaped.utf8.makeIterator()
+        while let byte = iter.next() {
+            if byte == UInt8(ascii: "\\") {
+                // Peek at next 3 bytes for octal sequence
+                guard let d1 = iter.next() else {
+                    result.append(byte)
+                    break
+                }
+                guard let d2 = iter.next() else {
+                    result.append(byte)
+                    result.append(d1)
+                    break
+                }
+                guard let d3 = iter.next() else {
+                    result.append(byte)
+                    result.append(d1)
+                    result.append(d2)
+                    break
+                }
+
                 if d1 >= UInt8(ascii: "0"), d1 <= UInt8(ascii: "7"),
                    d2 >= UInt8(ascii: "0"), d2 <= UInt8(ascii: "7"),
                    d3 >= UInt8(ascii: "0"), d3 <= UInt8(ascii: "7") {
@@ -352,12 +373,16 @@ final class TmuxControlService {
                               | ((d2 - UInt8(ascii: "0")) << 3)
                               | (d3 - UInt8(ascii: "0"))
                     result.append(value)
-                    i += 4
-                    continue
+                } else {
+                    // Not a valid octal triple — emit all 4 bytes literally
+                    result.append(byte)
+                    result.append(d1)
+                    result.append(d2)
+                    result.append(d3)
                 }
+            } else {
+                result.append(byte)
             }
-            result.append(utf8[i])
-            i += 1
         }
 
         return result

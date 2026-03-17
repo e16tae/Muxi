@@ -45,13 +45,13 @@ struct TerminalSessionView: View {
     /// The scrollback cache for the active pane, if any.
     private var activeScrollbackBuffer: TerminalBuffer? {
         guard let id = connectionManager.activePaneId else { return nil }
-        return scrollbackManager.cache(for: id.rawValue)
+        return scrollbackManager.cache(for: id)
     }
 
     /// The current scrollback offset for the active pane (0 = live).
     private var activeScrollbackOffset: Int {
         guard let id = connectionManager.activePaneId else { return 0 }
-        if case .scrolling(let offset, _) = scrollbackManager.state(for: id.rawValue) {
+        if case .scrolling(let offset, _) = scrollbackManager.state(for: id) {
             return offset
         }
         return 0
@@ -306,8 +306,8 @@ struct TerminalSessionView: View {
 
         // Exit scrollback on resize — terminal content reflows.
         let scrolledPanes = scrollbackManager.scrolledPaneIds
-        for paneIdStr in scrolledPanes {
-            returnToLive(paneId: PaneID(paneIdStr))
+        for paneId in scrolledPanes {
+            returnToLive(paneId: paneId)
         }
     }
 
@@ -385,7 +385,7 @@ struct TerminalSessionView: View {
     // MARK: - Scrollback
 
     private func handleScrollDelta(paneId: PaneID, delta: Int) {
-        let currentState = scrollbackManager.state(for: paneId.rawValue)
+        let currentState = scrollbackManager.state(for: paneId)
 
         switch currentState {
         case .live where delta > 0:
@@ -400,7 +400,7 @@ struct TerminalSessionView: View {
             if newOffset == 0 {
                 returnToLive(paneId: paneId)
             } else {
-                scrollbackManager.updateOffset(paneId: paneId.rawValue, offset: newOffset, totalLines: totalLines)
+                scrollbackManager.updateOffset(paneId: paneId, offset: newOffset, totalLines: totalLines)
                 // Fetch more history when user reaches the top of the cache.
                 let maxOffset = totalLines - visibleRows
                 if newOffset >= maxOffset && totalLines < 2000 {
@@ -414,15 +414,15 @@ struct TerminalSessionView: View {
     }
 
     private func fetchScrollbackIfNeeded(paneId: PaneID) {
-        guard scrollbackManager.state(for: paneId.rawValue) != .loading else { return }
-        scrollbackManager.setLoading(paneId: paneId.rawValue)
+        guard scrollbackManager.state(for: paneId) != .loading else { return }
+        scrollbackManager.setLoading(paneId: paneId)
         connectionManager.scrolledBackPanes.insert(paneId)
 
         Task {
             do {
                 let response = try await connectionManager.fetchScrollback(paneId: paneId)
                 guard !response.isEmpty else {
-                    scrollbackManager.returnToLive(paneId: paneId.rawValue)
+                    scrollbackManager.returnToLive(paneId: paneId)
                     connectionManager.scrolledBackPanes.remove(paneId)
                     return
                 }
@@ -440,10 +440,10 @@ struct TerminalSessionView: View {
                 let normalized = response.replacingOccurrences(of: "\n", with: "\r\n")
                 cacheBuffer.feed(normalized)
 
-                scrollbackManager.setScrolling(paneId: paneId.rawValue, offset: 1, totalLines: totalLines, cache: cacheBuffer)
+                scrollbackManager.setScrolling(paneId: paneId, offset: 1, totalLines: totalLines, cache: cacheBuffer)
             } catch {
                 logger.error("Scrollback fetch failed: \(error.localizedDescription)")
-                scrollbackManager.returnToLive(paneId: paneId.rawValue)
+                scrollbackManager.returnToLive(paneId: paneId)
                 connectionManager.scrolledBackPanes.remove(paneId)
             }
         }
@@ -478,14 +478,14 @@ struct TerminalSessionView: View {
 
                 // Preserve user's scroll position relative to the bottom.
                 let previousOffset: Int
-                if case .scrolling(let offset, _) = scrollbackManager.state(for: paneId.rawValue) {
+                if case .scrolling(let offset, _) = scrollbackManager.state(for: paneId) {
                     previousOffset = offset
                 } else {
                     previousOffset = 1
                 }
                 let addedLines = totalLines - currentTotal
 
-                scrollbackManager.setScrolling(paneId: paneId.rawValue, offset: previousOffset + addedLines, totalLines: totalLines, cache: cacheBuffer)
+                scrollbackManager.setScrolling(paneId: paneId, offset: previousOffset + addedLines, totalLines: totalLines, cache: cacheBuffer)
             } catch {
                 logger.error("Fetch more scrollback failed: \(error.localizedDescription)")
             }
@@ -493,7 +493,7 @@ struct TerminalSessionView: View {
     }
 
     private func returnToLive(paneId: PaneID) {
-        scrollbackManager.returnToLive(paneId: paneId.rawValue)
+        scrollbackManager.returnToLive(paneId: paneId)
         connectionManager.scrolledBackPanes.remove(paneId)
         connectionManager.paneHasNewOutput.remove(paneId)
     }

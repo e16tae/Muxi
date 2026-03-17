@@ -58,14 +58,14 @@ struct TmuxSessionTests {
     func sessionCreation() {
         let now = Date()
         let session = TmuxSession(
-            id: "$0",
+            id: SessionID("$0"),
             name: "dev",
             windows: [],
             createdAt: now,
             lastActivity: now
         )
 
-        #expect(session.id == "$0")
+        #expect(session.id == SessionID("$0"))
         #expect(session.name == "dev")
         #expect(session.windows.isEmpty)
         #expect(session.createdAt == now)
@@ -75,8 +75,8 @@ struct TmuxSessionTests {
     @Test("TmuxSession equality")
     func sessionEquality() {
         let now = Date()
-        let a = TmuxSession(id: "$0", name: "dev", windows: [], createdAt: now, lastActivity: now)
-        let b = TmuxSession(id: "$0", name: "dev", windows: [], createdAt: now, lastActivity: now)
+        let a = TmuxSession(id: SessionID("$0"), name: "dev", windows: [], createdAt: now, lastActivity: now)
+        let b = TmuxSession(id: SessionID("$0"), name: "dev", windows: [], createdAt: now, lastActivity: now)
         #expect(a == b)
     }
 }

@@ -104,8 +104,8 @@ final class ConnectionManager {
     }
 
     /// Test-only: simulate a `%session-window-changed` callback.
-    func simulateSessionWindowChanged(sessionId: String, windowId: WindowID) {
-        tmuxService.onSessionWindowChanged?(sessionId, windowId)
+    func simulateSessionWindowChanged(windowId: WindowID) {
+        tmuxService.onSessionWindowChanged?(windowId)
     }
 
     #endif
@@ -319,15 +319,14 @@ final class ConnectionManager {
     /// Panes that received new output while in scrollback mode.
     var paneHasNewOutput: Set<PaneID> = []
 
-    /// Whether the last disconnect was caused by the app going to background.
-    /// When true, `handleForeground()` will auto-reconnect.
-    private(set) var disconnectedByBackground = false
+    /// Captures the connection state at the moment the app enters background,
+    /// so `handleForeground()` can auto-reconnect to the same server/session.
+    private var backgroundState: BackgroundState = .none
 
-    /// The server from the last background disconnect, used for auto-reconnect.
-    private var lastBackgroundServer: Server?
-
-    /// The tmux session name from the last background disconnect.
-    private var lastBackgroundSession: String?
+    private enum BackgroundState {
+        case none
+        case awaitingReconnect(server: Server, session: String?)
+    }
 
     // MARK: - Reconnect Configuration
 
@@ -578,9 +577,8 @@ final class ConnectionManager {
     /// cancels the SSH monitor, sends tmux detach, and disconnects.
     func handleBackground() {
         if case .attached(let sessionName) = state {
-            lastBackgroundServer = currentServer
-            lastBackgroundSession = sessionName
-            disconnectedByBackground = true
+            guard let server = currentServer else { return }
+            backgroundState = .awaitingReconnect(server: server, session: sessionName)
 
             // Cancel monitor to prevent it from detecting our disconnect
             // and triggering its own reconnect.
@@ -608,9 +606,8 @@ final class ConnectionManager {
                 sshService.disconnect()
             }
         } else if state == .connecting {
-            lastBackgroundServer = currentServer
-            lastBackgroundSession = nil
-            disconnectedByBackground = true
+            guard let server = currentServer else { return }
+            backgroundState = .awaitingReconnect(server: server, session: nil)
 
             cachedAuth = nil
 
@@ -628,14 +625,8 @@ final class ConnectionManager {
     /// Called when the app returns to foreground. Auto-reconnects if the
     /// previous disconnect was caused by backgrounding.
     func handleForeground() {
-        guard disconnectedByBackground else { return }
-        disconnectedByBackground = false
-
-        guard let server = lastBackgroundServer ?? currentServer else {
-            lastBackgroundServer = nil
-            lastBackgroundSession = nil
-            return
-        }
+        guard case .awaitingReconnect(let server, let sessionName) = backgroundState else { return }
+        backgroundState = .none
 
         // Re-query Keychain for credentials cleared during background.
         if cachedAuth == nil {
@@ -644,8 +635,6 @@ final class ConnectionManager {
             } catch {
                 // User didn't save password — can't auto-reconnect.
                 logger.info("Cannot re-query credentials from Keychain: \(error.localizedDescription)")
-                lastBackgroundServer = nil
-                lastBackgroundSession = nil
                 state = .disconnected
                 return
             }
@@ -653,19 +642,13 @@ final class ConnectionManager {
 
         // Restore state needed by reconnect().
         currentServer = server
-        let sessionName = lastBackgroundSession
 
-        if let sessionName {
-            state = .attached(sessionName: sessionName)
-        } else {
-            // Was connecting/transitioning — just disconnect cleanly
-            lastBackgroundServer = nil
-            lastBackgroundSession = nil
+        guard let sessionName else {
+            // Was connecting/transitioning — just disconnect cleanly.
             return
         }
 
-        lastBackgroundServer = nil
-        lastBackgroundSession = nil
+        state = .attached(sessionName: sessionName)
 
         Task {
             await reconnect()
@@ -781,7 +764,7 @@ final class ConnectionManager {
                 "new-session -d -s \(name.shellEscaped())\n", type: .ignored)
             if !sessions.contains(where: { $0.name == name }) {
                 sessions.append(TmuxSession(
-                    id: "", name: name, windows: [], createdAt: Date(), lastActivity: Date()
+                    id: SessionID(""), name: name, windows: [], createdAt: Date(), lastActivity: Date()
                 ))
             }
             try await switchSession(to: name)
@@ -1105,7 +1088,7 @@ final class ConnectionManager {
             "new-session -d -s \(name.shellEscaped())\n", type: .ignored)
         if !sessions.contains(where: { $0.name == name }) {
             sessions.append(TmuxSession(
-                id: "", name: name, windows: [], createdAt: Date(), lastActivity: Date()
+                id: SessionID(""), name: name, windows: [], createdAt: Date(), lastActivity: Date()
             ))
         }
     }
@@ -1418,8 +1401,7 @@ final class ConnectionManager {
     /// flowing through the shell channel are dispatched to the correct
     /// ``TerminalBuffer`` instances.
     private func wireCallbacks() {
-        tmuxService.onPaneOutput = { [weak self] paneIdStr, data in
-            let paneId = PaneID(paneIdStr)
+        tmuxService.onPaneOutput = { [weak self] paneId, data in
             self?.paneBuffers[paneId]?.feedData(data)
             if self?.scrolledBackPanes.contains(paneId) == true {
                 self?.paneHasNewOutput.insert(paneId)
@@ -1441,7 +1423,7 @@ final class ConnectionManager {
             }
         }
 
-        tmuxService.onSessionWindowChanged = { [weak self] sessionId, windowId in
+        tmuxService.onSessionWindowChanged = { [weak self] windowId in
             guard let self else { return }
             guard windowId != self.activeWindowId else { return }
             self.logger.info("Session window changed to \(windowId.rawValue)")
@@ -1534,7 +1516,7 @@ final class ConnectionManager {
                 self.logger.info("Created session via control mode: \(name)")
                 if !self.sessions.contains(where: { $0.name == name }) {
                     self.sessions.append(TmuxSession(
-                        id: "", name: name, windows: [],
+                        id: SessionID(""), name: name, windows: [],
                         createdAt: Date(), lastActivity: Date()
                     ))
                 }

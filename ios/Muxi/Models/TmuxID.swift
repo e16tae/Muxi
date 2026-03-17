@@ -30,3 +30,14 @@ struct WindowID: Hashable, Identifiable, Sendable, CustomStringConvertible {
     init(_ string: String) { rawValue = string }
 }
 
+// MARK: - SessionID
+
+struct SessionID: Hashable, Identifiable, Sendable, CustomStringConvertible {
+    let rawValue: String   // e.g. "$0"
+    var id: String { rawValue }
+    var description: String { rawValue }
+
+    /// Create from a raw tmux session ID string (e.g. "$0").
+    init(_ string: String) { rawValue = string }
+}
+

@@ -215,8 +215,8 @@ final class WindowTrackingTests: XCTestCase {
     func testRenameSessionUpdatesLocalState() async throws {
         let manager = makeConnectedManager()
         manager.setSessionsForTesting([
-            TmuxSession(id: "$0", name: "work", windows: [], createdAt: Date(), lastActivity: Date()),
-            TmuxSession(id: "$1", name: "dev", windows: [], createdAt: Date(), lastActivity: Date()),
+            TmuxSession(id: SessionID("$0"), name: "work", windows: [], createdAt: Date(), lastActivity: Date()),
+            TmuxSession(id: SessionID("$1"), name: "dev", windows: [], createdAt: Date(), lastActivity: Date()),
         ])
         manager.setStateForTesting(.attached(sessionName: "work"))
 
@@ -233,8 +233,8 @@ final class WindowTrackingTests: XCTestCase {
     func testKillSessionRemovesFromArray() async throws {
         let manager = makeConnectedManager()
         manager.setSessionsForTesting([
-            TmuxSession(id: "$0", name: "work", windows: [], createdAt: Date(), lastActivity: Date()),
-            TmuxSession(id: "$1", name: "dev", windows: [], createdAt: Date(), lastActivity: Date()),
+            TmuxSession(id: SessionID("$0"), name: "work", windows: [], createdAt: Date(), lastActivity: Date()),
+            TmuxSession(id: SessionID("$1"), name: "dev", windows: [], createdAt: Date(), lastActivity: Date()),
         ])
         manager.setStateForTesting(.attached(sessionName: "work"))
 
@@ -407,7 +407,7 @@ final class WindowTrackingTests: XCTestCase {
         manager.activePaneId = PaneID("%0")
 
         // Session window changed (e.g., new-window)
-        manager.simulateSessionWindowChanged(sessionId: "$0", windowId: WindowID("@1"))
+        manager.simulateSessionWindowChanged(windowId: WindowID("@1"))
 
         // Should switch to the new window
         XCTAssertEqual(manager.activeWindowId, WindowID("@1"))
@@ -426,7 +426,7 @@ final class WindowTrackingTests: XCTestCase {
         manager.activePaneId = PaneID("%0")
 
         // Same window — should be ignored
-        manager.simulateSessionWindowChanged(sessionId: "$0", windowId: WindowID("@0"))
+        manager.simulateSessionWindowChanged(windowId: WindowID("@0"))
 
         // Nothing changed
         XCTAssertEqual(manager.activeWindowId, WindowID("@0"))
@@ -445,7 +445,7 @@ final class WindowTrackingTests: XCTestCase {
         manager.activePaneId = PaneID("%0")
 
         // Step 1: %session-window-changed switches to @1
-        manager.simulateSessionWindowChanged(sessionId: "$0", windowId: WindowID("@1"))
+        manager.simulateSessionWindowChanged(windowId: WindowID("@1"))
 
         XCTAssertEqual(manager.activeWindowId, WindowID("@1"))
         XCTAssertEqual(manager.switchingToWindowId, WindowID("@1"))

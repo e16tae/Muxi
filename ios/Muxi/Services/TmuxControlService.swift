@@ -18,7 +18,7 @@ final class TmuxControlService {
     // MARK: - Callbacks
 
     /// Called when a pane produces output (decoded from tmux octal escapes).
-    var onPaneOutput: ((_ paneId: String, _ data: Data) -> Void)?
+    var onPaneOutput: ((_ paneId: PaneID, _ data: Data) -> Void)?
 
     /// Called when a window's layout changes.
     var onLayoutChange: ((_ windowId: WindowID, _ panes: [Pane], _ isZoomed: Bool) -> Void)?
@@ -36,10 +36,10 @@ final class TmuxControlService {
     var onWindowPaneChanged: ((_ windowId: WindowID, _ paneId: PaneID) -> Void)?
 
     /// Called when the active window changes within a session.
-    var onSessionWindowChanged: ((_ sessionId: String, _ windowId: WindowID) -> Void)?
+    var onSessionWindowChanged: ((_ windowId: WindowID) -> Void)?
 
     /// Called when the active session changes.
-    var onSessionChanged: ((_ sessionId: String, _ name: String) -> Void)?
+    var onSessionChanged: ((_ sessionId: SessionID, _ name: String) -> Void)?
 
     /// Called when the session list changes (session created or destroyed).
     var onSessionsChanged: (() -> Void)?
@@ -171,7 +171,7 @@ final class TmuxControlService {
 
             switch type {
             case TMUX_MSG_OUTPUT:
-                let paneId = extractString(from: &msg.pane_id, capacity: Int(TMUX_ID_MAX))
+                let paneId = PaneID(extractString(from: &msg.pane_id, capacity: Int(TMUX_ID_MAX)))
                 let decoded: Data
                 if let ptr = msg.output_data, msg.output_len > 0 {
                     let escaped = String(cString: ptr)
@@ -223,12 +223,11 @@ final class TmuxControlService {
                 onWindowPaneChanged?(windowId, paneId)
 
             case TMUX_MSG_SESSION_WINDOW_CHANGED:
-                let sessionId = extractString(from: &msg.session_id, capacity: Int(TMUX_ID_MAX))
                 let windowId = WindowID(extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX)))
-                onSessionWindowChanged?(sessionId, windowId)
+                onSessionWindowChanged?(windowId)
 
             case TMUX_MSG_SESSION_CHANGED:
-                let sessionId = extractString(from: &msg.session_id, capacity: Int(TMUX_ID_MAX))
+                let sessionId = SessionID(extractString(from: &msg.session_id, capacity: Int(TMUX_ID_MAX)))
                 let name = extractString(from: &msg.session_name, capacity: Int(TMUX_NAME_MAX))
                 onSessionChanged?(sessionId, name)
 
@@ -295,7 +294,7 @@ final class TmuxControlService {
                 guard let name = parts.first else { return nil }
                 let nameStr = String(name).trimmingCharacters(in: .whitespaces)
                 return TmuxSession(
-                    id: "$\(nameStr)",
+                    id: SessionID("$\(nameStr)"),
                     name: nameStr,
                     windows: [],
                     createdAt: Date(),
@@ -315,7 +314,7 @@ final class TmuxControlService {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 let parts = trimmed.split(separator: ":", maxSplits: 3)
                 guard parts.count >= 3 else { return nil }
-                let id = String(parts[0])
+                let id = SessionID(String(parts[0]))
                 let name = String(parts[1])
                 return TmuxSession(
                     id: id,

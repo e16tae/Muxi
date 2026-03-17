@@ -8,36 +8,36 @@ import Foundation
 @MainActor
 @Observable
 final class ScrollbackManager {
-    private var states: [String: ScrollbackState] = [:]
-    private var caches: [String: TerminalBuffer] = [:]
+    private var states: [PaneID: ScrollbackState] = [:]
+    private var caches: [PaneID: TerminalBuffer] = [:]
 
     /// Pane IDs that are currently scrolled back (not live).
-    var scrolledPaneIds: Set<String> {
+    var scrolledPaneIds: Set<PaneID> {
         Set(states.filter { $0.value != .live }.map(\.key))
     }
 
-    func state(for paneId: String) -> ScrollbackState {
+    func state(for paneId: PaneID) -> ScrollbackState {
         states[paneId] ?? .live
     }
 
-    func cache(for paneId: String) -> TerminalBuffer? {
+    func cache(for paneId: PaneID) -> TerminalBuffer? {
         caches[paneId]
     }
 
-    func setLoading(paneId: String) {
+    func setLoading(paneId: PaneID) {
         states[paneId] = .loading
     }
 
-    func setScrolling(paneId: String, offset: Int, totalLines: Int, cache: TerminalBuffer) {
+    func setScrolling(paneId: PaneID, offset: Int, totalLines: Int, cache: TerminalBuffer) {
         states[paneId] = .scrolling(offset: offset, totalLines: totalLines)
         caches[paneId] = cache
     }
 
-    func updateOffset(paneId: String, offset: Int, totalLines: Int) {
+    func updateOffset(paneId: PaneID, offset: Int, totalLines: Int) {
         states[paneId] = .scrolling(offset: offset, totalLines: totalLines)
     }
 
-    func returnToLive(paneId: String) {
+    func returnToLive(paneId: PaneID) {
         states[paneId] = .live
         caches[paneId] = nil
     }

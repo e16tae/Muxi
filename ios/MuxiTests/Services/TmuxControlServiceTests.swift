@@ -25,7 +25,7 @@ final class TmuxControlServiceTests: XCTestCase {
         """
         let sessions = TmuxControlService.parseFormattedSessionList(output)
         XCTAssertEqual(sessions.count, 2)
-        XCTAssertEqual(sessions[0].id, "$0")
+        XCTAssertEqual(sessions[0].id, SessionID("$0"))
         XCTAssertEqual(sessions[0].name, "main")
         XCTAssertEqual(sessions[0].windows.count, 0)
     }
@@ -44,7 +44,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
     func testHandleControlModeOutput() {
         let service = TmuxControlService()
-        var receivedPaneId: String?
+        var receivedPaneId: PaneID?
         var receivedData: Data?
 
         service.onPaneOutput = { paneId, data in
@@ -54,7 +54,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
         service.handleLine("%output %0 Hello\\n")
 
-        XCTAssertEqual(receivedPaneId, "%0")
+        XCTAssertEqual(receivedPaneId, PaneID("%0"))
         XCTAssertNotNil(receivedData)
     }
 
@@ -137,7 +137,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
     func testHandleSessionChanged() {
         let service = TmuxControlService()
-        var receivedId: String?
+        var receivedId: SessionID?
         var receivedName: String?
 
         service.onSessionChanged = { id, name in
@@ -147,7 +147,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
         service.handleLine("%session-changed $0 work")
 
-        XCTAssertEqual(receivedId, "$0")
+        XCTAssertEqual(receivedId, SessionID("$0"))
         XCTAssertEqual(receivedName, "work")
     }
 
@@ -374,7 +374,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
     func testNotificationInsideResponseBlock() {
         let service = TmuxControlService()
-        var sessionChangedId: String?
+        var sessionChangedId: SessionID?
         var sessionChangedName: String?
         var commandResponse: String?
 
@@ -397,7 +397,7 @@ final class TmuxControlServiceTests: XCTestCase {
         service.feed(Data("%end 1234567890 1 0\n".utf8))
 
         // Notification must be dispatched, not swallowed
-        XCTAssertEqual(sessionChangedId, "$1")
+        XCTAssertEqual(sessionChangedId, SessionID("$1"))
         XCTAssertEqual(sessionChangedName, "beta")
 
         // Response should contain only data lines, not the notification

@@ -33,6 +33,54 @@ final class KeychainService {
     private let serviceName = "com.muxi.app"
     private let sshKeyService = "com.muxi.ssh-keys"
 
+    // MARK: - Internal Helpers
+
+    /// Upsert pattern: try `SecItemUpdate`, fall back to `SecItemAdd` if not found.
+    private func updateOrAdd(
+        query: [String: Any],
+        updateAttrs: [String: Any]
+    ) throws {
+        let updateStatus = SecItemUpdate(query as CFDictionary, updateAttrs as CFDictionary)
+
+        if updateStatus == errSecItemNotFound {
+            var addQuery = query
+            for (k, v) in updateAttrs { addQuery[k] = v }
+            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+            guard addStatus == errSecSuccess else {
+                throw KeychainError.unexpectedStatus(addStatus)
+            }
+        } else if updateStatus != errSecSuccess {
+            throw KeychainError.unexpectedStatus(updateStatus)
+        }
+    }
+
+    /// Delete a Keychain item. Silently succeeds if the item does not exist.
+    private func deleteItem(query: [String: Any]) throws {
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw KeychainError.unexpectedStatus(status)
+        }
+    }
+
+    /// Base search query for a password item.
+    private func passwordQuery(account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceName,
+            kSecAttrAccount as String: account,
+        ]
+    }
+
+    /// Base search query for an SSH key item.
+    private func sshKeyQuery(account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: sshKeyService,
+            kSecAttrAccount as String: account,
+        ]
+    }
+
     // MARK: - Passwords
 
     /// Save or update a password for the given account.
@@ -44,40 +92,17 @@ final class KeychainService {
             throw KeychainError.dataConversionFailed
         }
 
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: account,
-        ]
-
-        // Try to update first
-        let update: [String: Any] = [kSecValueData as String: data]
-        let updateStatus = SecItemUpdate(query as CFDictionary, update as CFDictionary)
-
-        if updateStatus == errSecItemNotFound {
-            var addQuery = query
-            addQuery[kSecValueData as String] = data
-            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-            guard addStatus == errSecSuccess else {
-                throw KeychainError.unexpectedStatus(addStatus)
-            }
-        } else if updateStatus != errSecSuccess {
-            throw KeychainError.unexpectedStatus(updateStatus)
-        }
+        let query = passwordQuery(account: account)
+        try updateOrAdd(query: query, updateAttrs: [kSecValueData as String: data])
     }
 
     /// Retrieve the password associated with the given account.
     ///
     /// - Throws: ``KeychainError/itemNotFound`` if no entry exists.
     func retrievePassword(account: String) throws -> String {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+        var query = passwordQuery(account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -99,22 +124,14 @@ final class KeychainService {
     ///
     /// Silently succeeds if the item does not exist.
     func deletePassword(account: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: account,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.unexpectedStatus(status)
-        }
+        try deleteItem(query: passwordQuery(account: account))
     }
 
     // MARK: - SSH Keys
 
     /// Save an SSH key's private data and metadata to the Keychain.
     ///
-    /// Uses a delete-then-add pattern.  The ``SSHKey`` metadata is stored
+    /// Uses an update-first-then-add pattern.  The ``SSHKey`` metadata is stored
     /// as JSON in the item's `kSecAttrComment` attribute.
     func saveSSHKey(_ key: SSHKey, privateKeyData: Data) throws {
         let metadata = try JSONEncoder().encode(key)
@@ -123,33 +140,13 @@ final class KeychainService {
             throw KeychainError.dataConversionFailed
         }
 
-        let searchQuery: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: sshKeyService,
-            kSecAttrAccount as String: key.id.uuidString,
-        ]
-
-        // Try to update first (atomic pattern, same as savePassword)
+        let query = sshKeyQuery(account: key.id.uuidString)
         let updateAttrs: [String: Any] = [
             kSecAttrLabel as String: key.name,
             kSecAttrComment as String: commentString,
             kSecValueData as String: privateKeyData,
         ]
-        let updateStatus = SecItemUpdate(searchQuery as CFDictionary, updateAttrs as CFDictionary)
-
-        if updateStatus == errSecItemNotFound {
-            var addQuery = searchQuery
-            addQuery[kSecAttrLabel as String] = key.name
-            addQuery[kSecAttrComment as String] = commentString
-            addQuery[kSecValueData as String] = privateKeyData
-            addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-            guard addStatus == errSecSuccess else {
-                throw KeychainError.unexpectedStatus(addStatus)
-            }
-        } else if updateStatus != errSecSuccess {
-            throw KeychainError.unexpectedStatus(updateStatus)
-        }
+        try updateOrAdd(query: query, updateAttrs: updateAttrs)
     }
 
     /// Retrieve an SSH key's metadata and private key data from the Keychain.
@@ -157,14 +154,10 @@ final class KeychainService {
     /// - Throws: ``KeychainError/itemNotFound`` if no key with the given
     ///   ID exists.
     func retrieveSSHKey(id: UUID) throws -> (SSHKey, Data) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: sshKeyService,
-            kSecAttrAccount as String: id.uuidString,
-            kSecReturnData as String: true,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+        var query = sshKeyQuery(account: id.uuidString)
+        query[kSecReturnData as String] = true
+        query[kSecReturnAttributes as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -192,15 +185,7 @@ final class KeychainService {
     ///
     /// Silently succeeds if the item does not exist.
     func deleteSSHKey(id: UUID) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: sshKeyService,
-            kSecAttrAccount as String: id.uuidString,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || status == errSecItemNotFound else {
-            throw KeychainError.unexpectedStatus(status)
-        }
+        try deleteItem(query: sshKeyQuery(account: id.uuidString))
     }
 
     /// List all SSH key metadata stored in the Keychain.

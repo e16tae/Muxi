@@ -33,7 +33,7 @@ struct Window: Identifiable, Equatable, Sendable {
 
 /// A tmux session running on a remote server.
 struct TmuxSession: Identifiable, Equatable, Sendable {
-    let id: String
+    let id: SessionID
     var name: String
     var windows: [Window]
     var createdAt: Date

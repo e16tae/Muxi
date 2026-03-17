@@ -21,14 +21,14 @@ struct ToolbarView: View {
 
     /// What we're renaming.
     enum RenameTarget: Equatable {
-        case window(id: String)
+        case window(id: WindowID)
         case session(name: String)
     }
 
     // Callbacks for tmux commands
     var onSendCommand: ((String) -> Void)?
-    var onSelectWindow: ((String) -> Void)?
-    var onSelectWindowAndPane: ((String, String) -> Void)?
+    var onSelectWindow: ((WindowID) -> Void)?
+    var onSelectWindowAndPane: ((WindowID, PaneID) -> Void)?
     var onNewSession: (() -> Void)?
     var onSwitchSession: ((String) -> Void)?
     var onKillSession: ((String) -> Void)?
@@ -97,13 +97,13 @@ struct ToolbarView: View {
                                 showRenameAlert = true
                             },
                             onCloseWindow: { windowId in
-                                onSendCommand?("kill-window -t \(windowId.shellEscaped())")
+                                onSendCommand?("kill-window -t \(windowId.rawValue.shellEscaped())")
                             },
                             onZoomPane: {
                                 onSendCommand?("resize-pane -Z")
                             },
                             onClosePane: { paneId in
-                                onSendCommand?("kill-pane -t \(paneId.shellEscaped())")
+                                onSendCommand?("kill-pane -t \(paneId.rawValue.shellEscaped())")
                             }
                         )
                     }

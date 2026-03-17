@@ -8,16 +8,17 @@ final class ToolbarTests: XCTestCase {
 
     func testPanesToShowUsesWindowPaneIds() {
         // When paneIds are populated, they should be used directly
-        let window = ConnectionManager.TmuxWindowInfo(
-            id: "@0", name: "bash", paneIds: ["%0", "%1"], isActive: true
+        let window = Window(
+            id: WindowID("@0"), name: "bash",
+            paneIds: [PaneID("%0"), PaneID("%1")], isActive: true
         )
         // panesToShow is private, so test indirectly via the view's data flow
-        XCTAssertEqual(window.paneIds, ["%0", "%1"])
+        XCTAssertEqual(window.paneIds, [PaneID("%0"), PaneID("%1")])
     }
 
     func testPanesToShowEmptyForInactiveWindowWithoutPanes() {
-        let window = ConnectionManager.TmuxWindowInfo(
-            id: "@1", name: "vim", paneIds: [], isActive: false
+        let window = Window(
+            id: WindowID("@1"), name: "vim", paneIds: [], isActive: false
         )
         // Inactive window with no pane info should show name only (empty paneIds)
         XCTAssertTrue(window.paneIds.isEmpty)
@@ -26,21 +27,21 @@ final class ToolbarTests: XCTestCase {
     // MARK: - RenameTarget
 
     func testRenameTargetEquality() {
-        let a = ToolbarView.RenameTarget.window(id: "@0")
-        let b = ToolbarView.RenameTarget.window(id: "@0")
+        let a = ToolbarView.RenameTarget.window(id: WindowID("@0"))
+        let b = ToolbarView.RenameTarget.window(id: WindowID("@0"))
         let c = ToolbarView.RenameTarget.session(name: "work")
         XCTAssertEqual(a, b)
         XCTAssertNotEqual(a, c)
     }
 
-    // MARK: - TmuxWindowInfo
+    // MARK: - Window
 
-    func testTmuxWindowInfoIdentifiable() {
-        let w1 = ConnectionManager.TmuxWindowInfo(
-            id: "@0", name: "bash", paneIds: [], isActive: true
+    func testWindowIdentifiable() {
+        let w1 = Window(
+            id: WindowID("@0"), name: "bash", paneIds: [], isActive: true
         )
-        let w2 = ConnectionManager.TmuxWindowInfo(
-            id: "@1", name: "vim", paneIds: [], isActive: false
+        let w2 = Window(
+            id: WindowID("@1"), name: "vim", paneIds: [], isActive: false
         )
         XCTAssertNotEqual(w1.id, w2.id)
     }

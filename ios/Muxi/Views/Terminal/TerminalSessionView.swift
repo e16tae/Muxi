@@ -28,17 +28,16 @@ struct TerminalSessionView: View {
     @State private var panes: [PaneContainerView.PaneInfo] = []
 
     private func buildPaneInfos() -> [PaneContainerView.PaneInfo] {
-        connectionManager.currentPanes.map { parsedPane in
-            let paneId = "%\(parsedPane.paneId)"
-            let buffer = connectionManager.paneBuffers[paneId]
-                ?? TerminalBuffer(cols: parsedPane.width, rows: parsedPane.height)
+        connectionManager.currentPanes.map { pane in
+            let buffer = connectionManager.paneBuffers[pane.id]
+                ?? TerminalBuffer(cols: pane.frame.width, rows: pane.frame.height)
             return PaneContainerView.PaneInfo(
-                id: paneId,
+                id: pane.id,
                 buffer: buffer,
-                x: parsedPane.x,
-                y: parsedPane.y,
-                width: parsedPane.width,
-                height: parsedPane.height
+                x: pane.frame.x,
+                y: pane.frame.y,
+                width: pane.frame.width,
+                height: pane.frame.height
             )
         }
     }
@@ -46,13 +45,13 @@ struct TerminalSessionView: View {
     /// The scrollback cache for the active pane, if any.
     private var activeScrollbackBuffer: TerminalBuffer? {
         guard let id = connectionManager.activePaneId else { return nil }
-        return scrollbackManager.cache(for: id)
+        return scrollbackManager.cache(for: id.rawValue)
     }
 
     /// The current scrollback offset for the active pane (0 = live).
     private var activeScrollbackOffset: Int {
         guard let id = connectionManager.activePaneId else { return 0 }
-        if case .scrolling(let offset, _) = scrollbackManager.state(for: id) {
+        if case .scrolling(let offset, _) = scrollbackManager.state(for: id.rawValue) {
             return offset
         }
         return 0
@@ -82,7 +81,7 @@ struct TerminalSessionView: View {
                     ),
                     onPaneTapped: { paneId in
                         isKeyboardActive = true
-                        sendTmuxCommand("select-pane -t \(paneId.shellEscaped()) -Z")
+                        sendTmuxCommand("select-pane -t \(paneId.rawValue.shellEscaped()) -Z")
                     },
                     onPaste: { text in
                         pasteToActivePane(text)
@@ -220,6 +219,10 @@ struct TerminalSessionView: View {
             // for subsequent layout events.  pendingAutoZoom prevents
             // double-toggling between the two paths.
         }
+        // currentPanes is computed from windowPaneState, so @Observable
+        // tracks the underlying stored property. This may fire on any
+        // windowPaneState mutation (e.g. activePaneId change), but
+        // buildPaneInfos() is lightweight — acceptable overhead.
         .onChange(of: connectionManager.currentPanes) { _, _ in
             panes = buildPaneInfos()
         }
@@ -303,8 +306,8 @@ struct TerminalSessionView: View {
 
         // Exit scrollback on resize — terminal content reflows.
         let scrolledPanes = scrollbackManager.scrolledPaneIds
-        for paneId in scrolledPanes {
-            returnToLive(paneId: paneId)
+        for paneIdStr in scrolledPanes {
+            returnToLive(paneId: PaneID(paneIdStr))
         }
     }
 
@@ -348,7 +351,7 @@ struct TerminalSessionView: View {
             do {
                 try await connectionManager.sendKeysToPane(paneId, data: data)
             } catch {
-                logger.error("Failed to send keys to pane \(paneId): \(error.localizedDescription)")
+                logger.error("Failed to send keys to pane \(paneId.rawValue): \(error.localizedDescription)")
             }
         }
     }
@@ -374,15 +377,15 @@ struct TerminalSessionView: View {
             do {
                 try await connectionManager.pasteToPane(paneId, text: text)
             } catch {
-                logger.error("Failed to paste to pane \(paneId): \(error.localizedDescription)")
+                logger.error("Failed to paste to pane \(paneId.rawValue): \(error.localizedDescription)")
             }
         }
     }
 
     // MARK: - Scrollback
 
-    private func handleScrollDelta(paneId: String, delta: Int) {
-        let currentState = scrollbackManager.state(for: paneId)
+    private func handleScrollDelta(paneId: PaneID, delta: Int) {
+        let currentState = scrollbackManager.state(for: paneId.rawValue)
 
         switch currentState {
         case .live where delta > 0:
@@ -397,7 +400,7 @@ struct TerminalSessionView: View {
             if newOffset == 0 {
                 returnToLive(paneId: paneId)
             } else {
-                scrollbackManager.updateOffset(paneId: paneId, offset: newOffset, totalLines: totalLines)
+                scrollbackManager.updateOffset(paneId: paneId.rawValue, offset: newOffset, totalLines: totalLines)
                 // Fetch more history when user reaches the top of the cache.
                 let maxOffset = totalLines - visibleRows
                 if newOffset >= maxOffset && totalLines < 2000 {
@@ -410,16 +413,16 @@ struct TerminalSessionView: View {
         }
     }
 
-    private func fetchScrollbackIfNeeded(paneId: String) {
-        guard scrollbackManager.state(for: paneId) != .loading else { return }
-        scrollbackManager.setLoading(paneId: paneId)
+    private func fetchScrollbackIfNeeded(paneId: PaneID) {
+        guard scrollbackManager.state(for: paneId.rawValue) != .loading else { return }
+        scrollbackManager.setLoading(paneId: paneId.rawValue)
         connectionManager.scrolledBackPanes.insert(paneId)
 
         Task {
             do {
                 let response = try await connectionManager.fetchScrollback(paneId: paneId)
                 guard !response.isEmpty else {
-                    scrollbackManager.returnToLive(paneId: paneId)
+                    scrollbackManager.returnToLive(paneId: paneId.rawValue)
                     connectionManager.scrolledBackPanes.remove(paneId)
                     return
                 }
@@ -437,10 +440,10 @@ struct TerminalSessionView: View {
                 let normalized = response.replacingOccurrences(of: "\n", with: "\r\n")
                 cacheBuffer.feed(normalized)
 
-                scrollbackManager.setScrolling(paneId: paneId, offset: 1, totalLines: totalLines, cache: cacheBuffer)
+                scrollbackManager.setScrolling(paneId: paneId.rawValue, offset: 1, totalLines: totalLines, cache: cacheBuffer)
             } catch {
                 logger.error("Scrollback fetch failed: \(error.localizedDescription)")
-                scrollbackManager.returnToLive(paneId: paneId)
+                scrollbackManager.returnToLive(paneId: paneId.rawValue)
                 connectionManager.scrolledBackPanes.remove(paneId)
             }
         }
@@ -449,7 +452,7 @@ struct TerminalSessionView: View {
     /// Fetch more history when the user scrolls to the top of the current cache.
     /// Doubles the fetch range (capped at 2000) and replaces the cache entirely,
     /// adjusting the scroll offset to preserve the user's position.
-    private func fetchMoreScrollback(paneId: String, currentTotal: Int) {
+    private func fetchMoreScrollback(paneId: PaneID, currentTotal: Int) {
         let newLineCount = min(currentTotal * 2, 2000)
         guard newLineCount > currentTotal else { return }
 
@@ -475,22 +478,22 @@ struct TerminalSessionView: View {
 
                 // Preserve user's scroll position relative to the bottom.
                 let previousOffset: Int
-                if case .scrolling(let offset, _) = scrollbackManager.state(for: paneId) {
+                if case .scrolling(let offset, _) = scrollbackManager.state(for: paneId.rawValue) {
                     previousOffset = offset
                 } else {
                     previousOffset = 1
                 }
                 let addedLines = totalLines - currentTotal
 
-                scrollbackManager.setScrolling(paneId: paneId, offset: previousOffset + addedLines, totalLines: totalLines, cache: cacheBuffer)
+                scrollbackManager.setScrolling(paneId: paneId.rawValue, offset: previousOffset + addedLines, totalLines: totalLines, cache: cacheBuffer)
             } catch {
                 logger.error("Fetch more scrollback failed: \(error.localizedDescription)")
             }
         }
     }
 
-    private func returnToLive(paneId: String) {
-        scrollbackManager.returnToLive(paneId: paneId)
+    private func returnToLive(paneId: PaneID) {
+        scrollbackManager.returnToLive(paneId: paneId.rawValue)
         connectionManager.scrolledBackPanes.remove(paneId)
         connectionManager.paneHasNewOutput.remove(paneId)
     }

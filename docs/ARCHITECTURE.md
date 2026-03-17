@@ -92,6 +92,27 @@ User taps server → ConnectionManager.connect()
   → UI re-renders
 ```
 
+### Window/Pane State Machine (ADR-0008)
+
+`ConnectionManager.windowPaneState` tracks the layout lifecycle:
+
+```
+disconnect / session-switch → awaitingLayout
+
+awaitingLayout ── first %layout-change ──→ active
+
+active ── selectWindow / sessionWindowChanged ──→ switchingWindow
+active ── mobileAutoZoom + unzoomed multi-pane ──→ autoZooming
+
+switchingWindow ── matching %layout-change ──→ active
+switchingWindow ── stale %layout-change ─────→ (ignored)
+
+autoZooming ── zoomed %layout-change ───→ active
+autoZooming ── timeout (2s) ────────────→ active (fallback)
+```
+
+Strong-typed IDs (`PaneID`, `WindowID`, `SessionID`) prevent accidental mixups at compile time.
+
 ### Terminal Rendering Flow
 
 ```

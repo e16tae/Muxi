@@ -14,6 +14,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Window/Pane state machine** (ADR-0008): Unified 10 scattered properties into `WindowPaneState` enum — eliminates impossible state combinations at compile time
+- **Strong-typed tmux IDs**: `PaneID`, `WindowID`, `SessionID` wrapper types prevent accidental ID mixups
+- **Unified models**: Merged `ParsedPane`/`TmuxPane` into `Pane`, merged `TmuxWindowInfo`/`TmuxWindow` into `Window`
+- **State reset consolidation**: 4 duplicate 12-property reset sites → single `resetWindowPaneState()` call
+
+### Removed
+
+- **Dead code**: `PaneSize`, `TmuxPane`, `TmuxWindow` structs (superseded by `Pane`/`Window`)
+- **`TmuxControlService.ParsedPane`**: Replaced by unified `Pane` model
+- **`ConnectionManager.TmuxWindowInfo`**: Replaced by unified `Window` model
+
+### Previously Changed
+
 - **Motion.entrance**: Differentiated from `transition` (0.4s vs 0.35s) for proper asymmetric enter/exit timing
 - **ShapeStyle extension**: Added missing `accentSubtle`, `accentMuted` dot-syntax accessors
 - **Token migration**: ReconnectingOverlay and ToolbarView now use MuxiTokens instead of raw literals

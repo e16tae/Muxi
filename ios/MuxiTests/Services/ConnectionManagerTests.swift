@@ -263,7 +263,7 @@ final class ConnectionManagerTests: XCTestCase {
         // connect() now auto-attaches, so state is already .attached
 
         let fetchTask = Task {
-            try await manager.fetchScrollback(paneId: "%0")
+            try await manager.fetchScrollback(paneId: PaneID("%0"))
         }
 
         // Give the fetch task time to send the command and set up continuation.
@@ -284,7 +284,7 @@ final class ConnectionManagerTests: XCTestCase {
         try await manager.connect(server: makeServer(), password: "p")
 
         let fetchTask = Task {
-            try await manager.fetchScrollback(paneId: "%0")
+            try await manager.fetchScrollback(paneId: PaneID("%0"))
         }
 
         try await Task.sleep(nanoseconds: 50_000_000) // 50ms
@@ -299,7 +299,7 @@ final class ConnectionManagerTests: XCTestCase {
         XCTAssertEqual(manager.state, .disconnected)
 
         do {
-            _ = try await manager.fetchScrollback(paneId: "%0")
+            _ = try await manager.fetchScrollback(paneId: PaneID("%0"))
             XCTFail("Expected ScrollbackError.notAttached")
         } catch let error as ScrollbackError {
             XCTAssertEqual(error, .notAttached)
@@ -317,13 +317,13 @@ final class ConnectionManagerTests: XCTestCase {
 
         // Start first fetch but do not deliver response yet.
         let firstTask = Task {
-            try await manager.fetchScrollback(paneId: "%0")
+            try await manager.fetchScrollback(paneId: PaneID("%0"))
         }
         try await Task.sleep(nanoseconds: 50_000_000) // 50ms — let first task set continuation
 
         // Second fetch should fail immediately.
         do {
-            _ = try await manager.fetchScrollback(paneId: "%0")
+            _ = try await manager.fetchScrollback(paneId: PaneID("%0"))
             XCTFail("Expected ScrollbackError.fetchInProgress")
         } catch let error as ScrollbackError {
             XCTAssertEqual(error, .fetchInProgress)

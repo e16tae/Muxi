@@ -8,19 +8,19 @@ import SwiftUI
 /// Tap pane -> selectWindowAndPane. Tap window name -> selectWindow.
 /// Long-press pane -> Zoom/Close. Long-press window -> Rename/Close.
 struct WindowPanePillsView: View {
-    let windows: [ConnectionManager.TmuxWindowInfo]
-    let activeWindowId: String?
-    let activePaneId: String?
-    let currentPanes: [TmuxControlService.ParsedPane]
+    let windows: [Window]
+    let activeWindowId: WindowID?
+    let activePaneId: PaneID?
+    let currentPanes: [Pane]
     let isZoomed: Bool
     let hideZoomToggle: Bool
 
-    var onSelectWindow: ((String) -> Void)?
-    var onSelectWindowAndPane: ((String, String) -> Void)?
-    var onRenameWindow: ((String) -> Void)?
-    var onCloseWindow: ((String) -> Void)?
+    var onSelectWindow: ((WindowID) -> Void)?
+    var onSelectWindowAndPane: ((WindowID, PaneID) -> Void)?
+    var onRenameWindow: ((WindowID) -> Void)?
+    var onCloseWindow: ((WindowID) -> Void)?
     var onZoomPane: (() -> Void)?
-    var onClosePane: ((String) -> Void)?
+    var onClosePane: ((PaneID) -> Void)?
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
@@ -35,7 +35,7 @@ struct WindowPanePillsView: View {
     // MARK: - Window Pill
 
     @ViewBuilder
-    private func windowPill(_ window: ConnectionManager.TmuxWindowInfo) -> some View {
+    private func windowPill(_ window: Window) -> some View {
         let isActiveWindow = window.id == activeWindowId
 
         HStack(spacing: 0) {
@@ -109,12 +109,12 @@ struct WindowPanePillsView: View {
     /// Normally populated by `list-panes -a` response. Falls back to
     /// ``currentPanes`` for the active window during the brief interval
     /// between `list-windows` and `list-panes` responses.
-    private func panesToShow(for window: ConnectionManager.TmuxWindowInfo) -> [String] {
+    private func panesToShow(for window: Window) -> [PaneID] {
         if !window.paneIds.isEmpty {
             return window.paneIds
         }
         if window.id == activeWindowId {
-            return currentPanes.map { "%\($0.paneId)" }
+            return currentPanes.map(\.id)
         }
         return []
     }

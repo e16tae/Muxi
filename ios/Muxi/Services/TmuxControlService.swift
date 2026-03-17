@@ -21,22 +21,22 @@ final class TmuxControlService {
     var onPaneOutput: ((_ paneId: String, _ data: Data) -> Void)?
 
     /// Called when a window's layout changes.
-    var onLayoutChange: ((_ windowId: String, _ panes: [ParsedPane], _ isZoomed: Bool) -> Void)?
+    var onLayoutChange: ((_ windowId: WindowID, _ panes: [Pane], _ isZoomed: Bool) -> Void)?
 
     /// Called when a new window is added.
-    var onWindowAdd: ((_ windowId: String) -> Void)?
+    var onWindowAdd: ((_ windowId: WindowID) -> Void)?
 
     /// Called when a window is closed.
-    var onWindowClose: ((_ windowId: String) -> Void)?
+    var onWindowClose: ((_ windowId: WindowID) -> Void)?
 
     /// Called when a window is renamed.
-    var onWindowRenamed: ((_ windowId: String, _ name: String) -> Void)?
+    var onWindowRenamed: ((_ windowId: WindowID, _ name: String) -> Void)?
 
     /// Called when the active pane changes within a window.
-    var onWindowPaneChanged: ((_ windowId: String, _ paneId: String) -> Void)?
+    var onWindowPaneChanged: ((_ windowId: WindowID, _ paneId: PaneID) -> Void)?
 
     /// Called when the active window changes within a session.
-    var onSessionWindowChanged: ((_ sessionId: String, _ windowId: String) -> Void)?
+    var onSessionWindowChanged: ((_ sessionId: String, _ windowId: WindowID) -> Void)?
 
     /// Called when the active session changes.
     var onSessionChanged: ((_ sessionId: String, _ name: String) -> Void)?
@@ -52,17 +52,6 @@ final class TmuxControlService {
 
     /// Called when a command response block (%begin ... %end) completes.
     var onCommandResponse: ((_ response: String) -> Void)?
-
-    // MARK: - ParsedPane
-
-    /// A single leaf pane extracted from a tmux layout string.
-    struct ParsedPane: Equatable {
-        let x: Int
-        let y: Int
-        let width: Int
-        let height: Int
-        let paneId: Int
-    }
 
     // MARK: - Line Accumulator
 
@@ -194,7 +183,8 @@ final class TmuxControlService {
                 onPaneOutput?(paneId, decoded)
 
             case TMUX_MSG_LAYOUT_CHANGE:
-                let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                let windowIdStr = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                let windowId = WindowID(windowIdStr)
                 let isZoomed = msg.is_zoomed != 0
                 // Use visible_layout (shows only the zoomed pane when zoomed).
                 var layoutStr = ""
@@ -205,36 +195,36 @@ final class TmuxControlService {
                         encoding: .utf8
                     ) ?? ""
                 }
-                tmuxLog.info("Layout change: window=\(windowId) layout=\(layoutStr) zoomed=\(isZoomed)")
+                tmuxLog.info("Layout change: window=\(windowIdStr) layout=\(layoutStr) zoomed=\(isZoomed)")
                 let panes = parseLayout(layoutStr)
                 tmuxLog.info("Parsed \(panes.count) panes from layout")
                 onLayoutChange?(windowId, panes, isZoomed)
 
             case TMUX_MSG_WINDOW_ADD:
-                let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                let windowId = WindowID(extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX)))
                 onWindowAdd?(windowId)
 
             case TMUX_MSG_WINDOW_CLOSE:
-                let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                let windowId = WindowID(extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX)))
                 onWindowClose?(windowId)
 
             case TMUX_MSG_WINDOW_RENAMED:
-                let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                let windowId = WindowID(extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX)))
                 let name = extractString(from: &msg.window_name, capacity: Int(TMUX_NAME_MAX))
                 onWindowRenamed?(windowId, name)
 
             case TMUX_MSG_UNLINKED_WINDOW_CLOSE:
-                let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                let windowId = WindowID(extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX)))
                 onWindowClose?(windowId)
 
             case TMUX_MSG_WINDOW_PANE_CHANGED:
-                let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
-                let paneId = extractString(from: &msg.pane_id, capacity: Int(TMUX_ID_MAX))
+                let windowId = WindowID(extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX)))
+                let paneId = PaneID(extractString(from: &msg.pane_id, capacity: Int(TMUX_ID_MAX)))
                 onWindowPaneChanged?(windowId, paneId)
 
             case TMUX_MSG_SESSION_WINDOW_CHANGED:
                 let sessionId = extractString(from: &msg.session_id, capacity: Int(TMUX_ID_MAX))
-                let windowId = extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX))
+                let windowId = WindowID(extractString(from: &msg.window_id, capacity: Int(TMUX_ID_MAX)))
                 onSessionWindowChanged?(sessionId, windowId)
 
             case TMUX_MSG_SESSION_CHANGED:
@@ -269,8 +259,8 @@ final class TmuxControlService {
 
     // MARK: - Layout Parsing
 
-    /// Parse a tmux layout string into an array of ``ParsedPane`` values.
-    private func parseLayout(_ layout: String) -> [ParsedPane] {
+    /// Parse a tmux layout string into an array of ``Pane`` values.
+    private func parseLayout(_ layout: String) -> [Pane] {
         var cPanes = [TmuxLayoutPane](repeating: TmuxLayoutPane(), count: 64)
         var count: Int32 = 0
 
@@ -278,12 +268,14 @@ final class TmuxControlService {
         guard result == 0 else { return [] }
 
         return (0..<min(Int(count), 64)).map { i in
-            ParsedPane(
-                x: Int(cPanes[i].x),
-                y: Int(cPanes[i].y),
-                width: Int(cPanes[i].width),
-                height: Int(cPanes[i].height),
-                paneId: Int(cPanes[i].pane_id)
+            Pane(
+                id: PaneID(index: Int(cPanes[i].pane_id)),
+                frame: Pane.CellFrame(
+                    x: Int(cPanes[i].x),
+                    y: Int(cPanes[i].y),
+                    width: Int(cPanes[i].width),
+                    height: Int(cPanes[i].height)
+                )
             )
         }
     }

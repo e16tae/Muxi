@@ -75,6 +75,7 @@ Recorded in `docs/decisions/`. Each ADR captures one decision with context, alte
 | [0005](docs/decisions/0005-sarasa-term-k-font.md) | Sarasa Term K Nerd Font (build pipeline + Korean optimization) |
 | [0006](docs/decisions/0006-semantic-token-design-system.md) | Semantic token design system (MuxiTokens) |
 | [0007](docs/decisions/0007-switch-client-session-switching.md) | In-place session switching via switch-client |
+| [0008](docs/decisions/0008-window-pane-state-machine.md) | Window/Pane state machine with strong-typed IDs |
 
 ## Workflow — Phase Reference
 

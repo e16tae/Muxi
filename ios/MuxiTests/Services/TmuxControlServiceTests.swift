@@ -60,8 +60,8 @@ final class TmuxControlServiceTests: XCTestCase {
 
     func testHandleLayoutChange() {
         let service = TmuxControlService()
-        var receivedWindowId: String?
-        var receivedPanes: [TmuxControlService.ParsedPane]?
+        var receivedWindowId: WindowID?
+        var receivedPanes: [Pane]?
         var receivedIsZoomed: Bool?
 
         service.onLayoutChange = { windowId, panes, isZoomed in
@@ -72,24 +72,24 @@ final class TmuxControlServiceTests: XCTestCase {
 
         service.handleLine("%layout-change @0 abcd,80x24,0,0{40x24,0,0,0,39x24,41,0,1}")
 
-        XCTAssertEqual(receivedWindowId, "@0")
+        XCTAssertEqual(receivedWindowId, WindowID("@0"))
         XCTAssertEqual(receivedIsZoomed, false)
         XCTAssertNotNil(receivedPanes)
         if let panes = receivedPanes {
             XCTAssertEqual(panes.count, 2)
-            XCTAssertEqual(panes[0].width, 40)
-            XCTAssertEqual(panes[0].height, 24)
-            XCTAssertEqual(panes[0].paneId, 0)
-            XCTAssertEqual(panes[1].width, 39)
-            XCTAssertEqual(panes[1].height, 24)
-            XCTAssertEqual(panes[1].x, 41)
-            XCTAssertEqual(panes[1].paneId, 1)
+            XCTAssertEqual(panes[0].frame.width, 40)
+            XCTAssertEqual(panes[0].frame.height, 24)
+            XCTAssertEqual(panes[0].id, PaneID(index: 0))
+            XCTAssertEqual(panes[1].frame.width, 39)
+            XCTAssertEqual(panes[1].frame.height, 24)
+            XCTAssertEqual(panes[1].frame.x, 41)
+            XCTAssertEqual(panes[1].id, PaneID(index: 1))
         }
     }
 
     func testHandleLayoutChangeZoomed() {
         let service = TmuxControlService()
-        var receivedPanes: [TmuxControlService.ParsedPane]?
+        var receivedPanes: [Pane]?
         var receivedIsZoomed: Bool?
 
         service.onLayoutChange = { _, panes, isZoomed in
@@ -104,14 +104,14 @@ final class TmuxControlServiceTests: XCTestCase {
         XCTAssertNotNil(receivedPanes)
         // visible_layout is a single pane
         XCTAssertEqual(receivedPanes?.count, 1)
-        XCTAssertEqual(receivedPanes?.first?.width, 80)
-        XCTAssertEqual(receivedPanes?.first?.height, 24)
-        XCTAssertEqual(receivedPanes?.first?.paneId, 0)
+        XCTAssertEqual(receivedPanes?.first?.frame.width, 80)
+        XCTAssertEqual(receivedPanes?.first?.frame.height, 24)
+        XCTAssertEqual(receivedPanes?.first?.id, PaneID(index: 0))
     }
 
     func testHandleWindowAdd() {
         let service = TmuxControlService()
-        var receivedWindowId: String?
+        var receivedWindowId: WindowID?
 
         service.onWindowAdd = { windowId in
             receivedWindowId = windowId
@@ -119,12 +119,12 @@ final class TmuxControlServiceTests: XCTestCase {
 
         service.handleLine("%window-add @1")
 
-        XCTAssertEqual(receivedWindowId, "@1")
+        XCTAssertEqual(receivedWindowId, WindowID("@1"))
     }
 
     func testHandleWindowClose() {
         let service = TmuxControlService()
-        var receivedWindowId: String?
+        var receivedWindowId: WindowID?
 
         service.onWindowClose = { windowId in
             receivedWindowId = windowId
@@ -132,7 +132,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
         service.handleLine("%window-close @2")
 
-        XCTAssertEqual(receivedWindowId, "@2")
+        XCTAssertEqual(receivedWindowId, WindowID("@2"))
     }
 
     func testHandleSessionChanged() {
@@ -179,7 +179,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
     func testHandleWindowRenamed() {
         let service = TmuxControlService()
-        var receivedWindowId: String?
+        var receivedWindowId: WindowID?
         var receivedName: String?
 
         service.onWindowRenamed = { windowId, name in
@@ -189,7 +189,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
         service.handleLine("%window-renamed @0 vim")
 
-        XCTAssertEqual(receivedWindowId, "@0")
+        XCTAssertEqual(receivedWindowId, WindowID("@0"))
         XCTAssertEqual(receivedName, "vim")
     }
 
@@ -208,7 +208,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
     func testHandleUnlinkedWindowClose() {
         let service = TmuxControlService()
-        var receivedWindowId: String?
+        var receivedWindowId: WindowID?
 
         service.onWindowClose = { windowId in
             receivedWindowId = windowId
@@ -216,7 +216,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
         service.handleLine("%unlinked-window-close @3")
 
-        XCTAssertEqual(receivedWindowId, "@3")
+        XCTAssertEqual(receivedWindowId, WindowID("@3"))
     }
 
     func testHandleUnknownLine() {
@@ -278,7 +278,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
     func testFeedPartialThenComplete() {
         let service = TmuxControlService()
-        var receivedWindowId: String?
+        var receivedWindowId: WindowID?
 
         service.onWindowAdd = { windowId in
             receivedWindowId = windowId
@@ -292,12 +292,12 @@ final class TmuxControlServiceTests: XCTestCase {
 
         // Complete the line
         service.feed(Data("-add @5\n".utf8))
-        XCTAssertEqual(receivedWindowId, "@5")
+        XCTAssertEqual(receivedWindowId, WindowID("@5"))
     }
 
     func testFeedMultipleLines() {
         let service = TmuxControlService()
-        var windowAddIds: [String] = []
+        var windowAddIds: [WindowID] = []
 
         service.onWindowAdd = { windowId in
             windowAddIds.append(windowId)
@@ -308,8 +308,8 @@ final class TmuxControlServiceTests: XCTestCase {
         service.feed(data)
 
         XCTAssertEqual(windowAddIds.count, 2)
-        XCTAssertEqual(windowAddIds[0], "@1")
-        XCTAssertEqual(windowAddIds[1], "@2")
+        XCTAssertEqual(windowAddIds[0], WindowID("@1"))
+        XCTAssertEqual(windowAddIds[1], WindowID("@2"))
     }
 
     func testFeedChunkedData() {
@@ -333,7 +333,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
     func testResetLineBuffer() {
         let service = TmuxControlService()
-        var receivedWindowId: String?
+        var receivedWindowId: WindowID?
 
         service.onWindowAdd = { windowId in
             receivedWindowId = windowId
@@ -353,7 +353,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
         // Feed a fresh complete line — old partial data is gone
         service.feed(Data("%window-add @9\n".utf8))
-        XCTAssertEqual(receivedWindowId, "@9")
+        XCTAssertEqual(receivedWindowId, WindowID("@9"))
     }
 
     func testFeedWithCarriageReturn() {
@@ -474,7 +474,7 @@ final class TmuxControlServiceTests: XCTestCase {
 
     func testFeedLargeChunkAllLinesDelivered() {
         let service = TmuxControlService()
-        var addedWindows: [String] = []
+        var addedWindows: [WindowID] = []
         service.onWindowAdd = { windowId in
             addedWindows.append(windowId)
         }
@@ -489,7 +489,7 @@ final class TmuxControlServiceTests: XCTestCase {
         service.feed(Data(payload.utf8))
 
         XCTAssertEqual(addedWindows.count, 50)
-        XCTAssertEqual(addedWindows.first, "@0")
-        XCTAssertEqual(addedWindows.last, "@49")
+        XCTAssertEqual(addedWindows.first, WindowID("@0"))
+        XCTAssertEqual(addedWindows.last, WindowID("@49"))
     }
 }

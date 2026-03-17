@@ -60,17 +60,17 @@ struct PaneContainerView: View {
     let panes: [PaneInfo]
     let theme: Theme
     var fontSize: CGFloat = 14
-    @Binding var activePaneId: String?
+    @Binding var activePaneId: PaneID?
     /// Called when the user taps a pane.
-    var onPaneTapped: ((String) -> Void)?
+    var onPaneTapped: ((PaneID) -> Void)?
     var onPaste: ((String) -> Void)?
 
     // Scrollback
     var scrollbackBuffer: TerminalBuffer?
     var scrollbackOffset: Int = 0
-    var onScrollOffsetChanged: ((String, Int) -> Void)?
+    var onScrollOffsetChanged: ((PaneID, Int) -> Void)?
     var showNewOutputIndicator: Bool = false
-    var onReturnToLive: ((String) -> Void)?
+    var onReturnToLive: ((PaneID) -> Void)?
 
     @Environment(\.horizontalSizeClass) private var sizeClass
 
@@ -78,8 +78,7 @@ struct PaneContainerView: View {
 
     /// Describes a single terminal pane and its layout geometry.
     struct PaneInfo: Identifiable, Equatable {
-        /// tmux pane identifier, e.g. "%0", "%1".
-        let id: String
+        let id: PaneID
         let buffer: TerminalBuffer
         // Layout from tmux (used for iPad split view positioning).
         var x: Int = 0

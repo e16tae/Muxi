@@ -316,4 +316,57 @@ final class TerminalBufferTests: XCTestCase {
         // Cursor position is still tracked even when hidden.
         XCTAssertEqual(buffer.cursorCol, 5)
     }
+
+    // MARK: - Reset Content
+
+    func testResetContentClearsGrid() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("Hello, World!")
+
+        buffer.resetContent()
+
+        // Grid should be empty
+        let cell = buffer.cellAt(row: 0, col: 0)
+        XCTAssertEqual(cell.character, Character(" "))
+
+        // Cursor at origin
+        XCTAssertEqual(buffer.cursorRow, 0)
+        XCTAssertEqual(buffer.cursorCol, 0)
+
+        // Dimensions preserved
+        XCTAssertEqual(buffer.cols, 80)
+        XCTAssertEqual(buffer.rows, 24)
+    }
+
+    func testResetContentPreservesOnUpdate() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        var callCount = 0
+        buffer.onUpdate = { callCount += 1 }
+
+        buffer.feed("Before")
+        XCTAssertEqual(callCount, 1)
+
+        buffer.resetContent()
+
+        // onUpdate should still fire after reset
+        buffer.feed("After")
+        XCTAssertEqual(callCount, 2)
+    }
+
+    func testResetContentThenFeedWorks() {
+        let buffer = TerminalBuffer(cols: 80, rows: 24)
+        buffer.feed("\u{1B}[1;31mBold Red")
+
+        buffer.resetContent()
+        buffer.feed("Plain")
+
+        // New content should render without old attributes
+        let cell = buffer.cellAt(row: 0, col: 0)
+        XCTAssertEqual(cell.character, Character("P"))
+        XCTAssertFalse(cell.isBold)
+        XCTAssertEqual(cell.fgColor, .default)
+
+        let line = buffer.lineText(row: 0)
+        XCTAssertEqual(line, "Plain")
+    }
 }

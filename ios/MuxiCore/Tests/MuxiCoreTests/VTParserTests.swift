@@ -870,3 +870,65 @@ import CVTParser
     vt_parser_feed(&parser, noParam, Int32(noParam.utf8.count))
     #expect(parser.cursor_style == 0)
 }
+
+// MARK: - Reset Tests
+
+@Test func testResetClearsContent() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 40, 10)
+    defer { vt_parser_destroy(&parser) }
+
+    let text = "\u{1B}[1;31mHello"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+    #expect(parser.cursor_col == 5)
+
+    vt_parser_reset(&parser)
+
+    // Cursor should be at origin
+    #expect(parser.cursor_row == 0)
+    #expect(parser.cursor_col == 0)
+
+    // Dimensions preserved
+    #expect(parser.cols == 40)
+    #expect(parser.rows == 10)
+
+    // Cell content cleared
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.character == 0)
+    #expect(cell.attrs == 0)
+    #expect(cell.fg_has_color == 0)
+
+    // cursor_visible restored to default
+    #expect(parser.cursor_visible == 1)
+
+    // scroll region restored
+    #expect(parser.scroll_top == 0)
+    #expect(parser.scroll_bottom == 9)
+}
+
+@Test func testResetPreservesSubsequentFeed() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // Feed bold + red text
+    let text = "\u{1B}[1;31mHello"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    vt_parser_reset(&parser)
+
+    // Feed plain text after reset — no attribute leakage
+    let plain = "World"
+    vt_parser_feed(&parser, plain, Int32(plain.utf8.count))
+
+    var cell = VTCell()
+    vt_parser_get_cell(&parser, 0, 0, &cell)
+    #expect(cell.character == UInt32(Character("W").asciiValue!))
+    #expect(cell.attrs == 0)        // no bold
+    #expect(cell.fg_has_color == 0)  // no red
+
+    var buf = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    #expect(String(cString: buf) == "World")
+}

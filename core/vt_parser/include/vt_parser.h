@@ -94,4 +94,7 @@ void vt_parser_get_cell(const VTParserState *parser, int32_t row, int32_t col, V
 // Set the cursor position (clamped to grid bounds)
 void vt_parser_set_cursor(VTParserState *parser, int32_t row, int32_t col);
 
+// Reset parser to initial state, preserving dimensions and buffer allocation.
+void vt_parser_reset(VTParserState *parser);
+
 #endif

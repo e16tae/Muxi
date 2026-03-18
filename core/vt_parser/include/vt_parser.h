@@ -52,7 +52,7 @@ typedef struct {
     // CSI parameter accumulation
     int32_t  csi_params[16];
     int32_t  csi_param_count;
-    int32_t  csi_private;   // '?' prefix
+    int32_t  csi_private;   // Private prefix char: '?' '>' '<' '='
 
     // Scroll region
     int32_t  scroll_top;

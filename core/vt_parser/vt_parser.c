@@ -308,12 +308,12 @@ static void handle_csi(VTParserState *p, char cmd) {
         p->cursor_col = 0;
         break;
     case 'h': /* Set Mode */
-        if (p->csi_private) {
+        if (p->csi_private == '?') {
             if (n == 25) p->cursor_visible = 1; /* DECTCEM: show cursor */
         }
         break;
     case 'l': /* Reset Mode */
-        if (p->csi_private) {
+        if (p->csi_private == '?') {
             if (n == 25) p->cursor_visible = 0; /* DECTCEM: hide cursor */
         }
         break;
@@ -478,8 +478,9 @@ void vt_parser_feed(VTParserState *parser, const char *data, int32_t len) {
             break;
 
         case VT_STATE_CSI_ENTRY:
-            if (ch == '?') {
-                parser->csi_private = 1;
+            if (ch >= 0x3C && ch <= 0x3F) {
+                /* Private parameter prefix: ? > = < */
+                parser->csi_private = ch;
                 parser->state = VT_STATE_CSI_PARAM;
             } else if (ch >= 0x20 && ch <= 0x2F) {
                 /* Intermediate byte (e.g. SP for DECSCUSR) */

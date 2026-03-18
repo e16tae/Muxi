@@ -871,6 +871,52 @@ import CVTParser
     #expect(parser.cursor_style == 0)
 }
 
+// MARK: - CSI Private Parameter Prefix Tests
+
+@Test func testXTVERSIONNotPrintedAsLiteral() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // CSI > 0 q — XTVERSION query; must be silently consumed
+    let text = "\u{1B}[>0q"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    // Nothing should be printed — cursor stays at origin
+    #expect(parser.cursor_col == 0)
+    var buf = [CChar](repeating: 0, count: 256)
+    vt_parser_get_line(&parser, 0, &buf, 256)
+    #expect(String(cString: buf) == "")
+}
+
+@Test func testDA2NotPrintedAsLiteral() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // CSI > 0 c — DA2 (Secondary Device Attributes); must be consumed
+    let text = "\u{1B}[>0c"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+
+    #expect(parser.cursor_col == 0)
+}
+
+@Test func testPrivatePrefixDoesNotAffectDECTCEM() {
+    var parser = VTParserState()
+    vt_parser_init(&parser, 80, 24)
+    defer { vt_parser_destroy(&parser) }
+
+    // CSI > 25 h — unknown private sequence, must NOT toggle cursor
+    let text = "\u{1B}[>25h"
+    vt_parser_feed(&parser, text, Int32(text.utf8.count))
+    #expect(parser.cursor_visible == 1) // unchanged
+
+    // CSI ? 25 l — standard DECTCEM hide still works
+    let hide = "\u{1B}[?25l"
+    vt_parser_feed(&parser, hide, Int32(hide.utf8.count))
+    #expect(parser.cursor_visible == 0)
+}
+
 // MARK: - Reset Tests
 
 @Test func testResetClearsContent() {

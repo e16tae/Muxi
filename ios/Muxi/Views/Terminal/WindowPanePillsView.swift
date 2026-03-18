@@ -59,37 +59,39 @@ struct WindowPanePillsView: View {
                 onSelectWindow?(window.id)
             }
 
-            // Pane segments
+            // Pane segments (hidden when only 1 pane)
             let paneIds = panesToShow(for: window)
-            ForEach(Array(paneIds.enumerated()), id: \.offset) { index, paneId in
-                let isActivePane = paneId == activePaneId
+            if paneIds.count > 1 {
+                ForEach(Array(paneIds.enumerated()), id: \.offset) { index, paneId in
+                    let isActivePane = paneId == activePaneId
 
-                Rectangle()
-                    .fill(MuxiTokens.Colors.borderDefault)
-                    .frame(width: 1)
+                    Rectangle()
+                        .fill(MuxiTokens.Colors.borderDefault)
+                        .frame(width: 1)
 
-                Menu {
-                    if !hideZoomToggle {
-                        Button(isZoomed ? "Unzoom" : "Zoom") {
-                            onZoomPane?()
+                    Menu {
+                        if !hideZoomToggle {
+                            Button(isZoomed ? "Unzoom" : "Zoom") {
+                                onZoomPane?()
+                            }
                         }
+                        Button("Close Pane", role: .destructive) {
+                            onClosePane?(paneId)
+                        }
+                    } label: {
+                        Text("\(index)")
+                        .font(MuxiTokens.Typography.label).fontWeight(.semibold)
+                        .foregroundStyle(isActivePane
+                            ? MuxiTokens.Colors.textInverse
+                            : MuxiTokens.Colors.textTertiary)
+                        .padding(.horizontal, MuxiTokens.Spacing.sm)
+                        .padding(.vertical, MuxiTokens.Spacing.xs)
+                        .background(isActivePane
+                            ? MuxiTokens.Colors.accentDefault
+                            : Color.clear)
+                    } primaryAction: {
+                        onSelectWindowAndPane?(window.id, paneId)
                     }
-                    Button("Close Pane", role: .destructive) {
-                        onClosePane?(paneId)
-                    }
-                } label: {
-                    Text("\(index)")
-                    .font(MuxiTokens.Typography.label).fontWeight(.semibold)
-                    .foregroundStyle(isActivePane
-                        ? MuxiTokens.Colors.textInverse
-                        : MuxiTokens.Colors.textTertiary)
-                    .padding(.horizontal, MuxiTokens.Spacing.sm)
-                    .padding(.vertical, MuxiTokens.Spacing.xs)
-                    .background(isActivePane
-                        ? MuxiTokens.Colors.accentDefault
-                        : Color.clear)
-                } primaryAction: {
-                    onSelectWindowAndPane?(window.id, paneId)
                 }
             }
         }

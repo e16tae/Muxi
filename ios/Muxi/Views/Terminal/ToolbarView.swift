@@ -71,7 +71,7 @@ struct ToolbarView: View {
                 } else {
                     if connectionManager.currentWindows.isEmpty {
                         Text(sessionName)
-                            .font(MuxiTokens.Typography.label).fontWeight(.semibold)
+                            .font(MuxiTokens.Typography.pill)
                             .foregroundStyle(MuxiTokens.Colors.textPrimary)
                             .padding(.horizontal, MuxiTokens.Spacing.md)
                             .padding(.vertical, MuxiTokens.Spacing.xs)
@@ -110,8 +110,8 @@ struct ToolbarView: View {
                 }
             }
             .padding(.horizontal, MuxiTokens.Spacing.md)
-            .padding(.vertical, MuxiTokens.Spacing.sm)
-            .frame(maxWidth: .infinity, minHeight: 40, alignment: .leading)
+            .padding(.vertical, MuxiTokens.Spacing.xs)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(MuxiTokens.Colors.surfaceRaised)
             .clipShape(RoundedRectangle(cornerRadius: MuxiTokens.Radius.md))
 

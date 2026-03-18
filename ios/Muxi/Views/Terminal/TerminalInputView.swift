@@ -22,6 +22,15 @@ final class TerminalInputAccessor: UIView, UIKeyInput {
     /// Called for raw terminal bytes (Ctrl/Alt combos) from hardware keyboard.
     var onRawData: ((Data) -> Void)?
 
+    /// Called when ⌘C is pressed (relayed to text overlay for copy).
+    var onCopyAction: (() -> Void)?
+
+    /// Called when ⌘V is pressed (clipboard paste).
+    var onClipboardPaste: (() -> Void)?
+
+    /// Called when ⌘A is pressed (relayed to text overlay for select all).
+    var onSelectAllAction: (() -> Void)?
+
     // MARK: - Input Accessory View
 
     private var _inputAccessoryView: UIView?
@@ -112,6 +121,11 @@ final class TerminalInputAccessor: UIView, UIKeyInput {
             commands.append(UIKeyCommand(input: char, modifierFlags: .alternate, action: sel))
         }
 
+        // ⌘C, ⌘V, ⌘A — clipboard & selection shortcuts.
+        commands.append(UIKeyCommand(input: "c", modifierFlags: .command, action: sel))
+        commands.append(UIKeyCommand(input: "v", modifierFlags: .command, action: sel))
+        commands.append(UIKeyCommand(input: "a", modifierFlags: .command, action: sel))
+
         return commands
     }()
 
@@ -138,6 +152,17 @@ final class TerminalInputAccessor: UIView, UIKeyInput {
                 onSpecialKey?(key)
                 return
             }
+        }
+
+        // ⌘+letter (Copy/Paste/Select All).
+        if command.modifierFlags.contains(.command) {
+            switch input {
+            case "c": onCopyAction?()
+            case "v": onClipboardPaste?()
+            case "a": onSelectAllAction?()
+            default: break
+            }
+            return
         }
 
         // Ctrl+letter.
@@ -168,6 +193,9 @@ struct TerminalInputView: UIViewRepresentable {
     var onDelete: () -> Void
     var onSpecialKey: ((SpecialKey) -> Void)?
     var onRawData: ((Data) -> Void)?
+    var onCopyAction: (() -> Void)?
+    var onClipboardPaste: (() -> Void)?
+    var onSelectAllAction: (() -> Void)?
     @Binding var isActive: Bool
 
     func makeCoordinator() -> Coordinator {
@@ -182,6 +210,9 @@ struct TerminalInputView: UIViewRepresentable {
         view.onDelete = onDelete
         view.onSpecialKey = onSpecialKey
         view.onRawData = onRawData
+        view.onCopyAction = onCopyAction
+        view.onClipboardPaste = onClipboardPaste
+        view.onSelectAllAction = onSelectAllAction
         context.coordinator.inputView = view
 
         // 1×1pt invisible — iOS 26 requires non-zero frame for first responder.
@@ -199,6 +230,9 @@ struct TerminalInputView: UIViewRepresentable {
         uiView.onDelete = onDelete
         uiView.onSpecialKey = onSpecialKey
         uiView.onRawData = onRawData
+        uiView.onCopyAction = onCopyAction
+        uiView.onClipboardPaste = onClipboardPaste
+        uiView.onSelectAllAction = onSelectAllAction
 
         // Only change responder state when binding diverges from UIKit reality.
         if isActive != uiView.isFirstResponder {

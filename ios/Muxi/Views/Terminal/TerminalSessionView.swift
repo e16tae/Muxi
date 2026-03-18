@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import CoreText
 import os
 
@@ -25,6 +26,7 @@ struct TerminalSessionView: View {
     @State private var renameTarget: ToolbarView.RenameTarget?
     @State private var renameText = ""
 
+    @State private var selectionRelay = TerminalSelectionRelay()
     @State private var panes: [PaneContainerView.PaneInfo] = []
 
     private func buildPaneInfos() -> [PaneContainerView.PaneInfo] {
@@ -86,6 +88,8 @@ struct TerminalSessionView: View {
                     onPaste: { text in
                         pasteToActivePane(text)
                     },
+                    selectionRelay: selectionRelay,
+                    onKeyboardReactivate: { isKeyboardActive = true },
                     scrollbackBuffer: activeScrollbackBuffer,
                     scrollbackOffset: activeScrollbackOffset,
                     onScrollOffsetChanged: { paneId, delta in
@@ -186,6 +190,13 @@ struct TerminalSessionView: View {
             onRawData: { data in
                 sendToActivePane(data)
             },
+            onCopyAction: { selectionRelay.performCopy?() },
+            onClipboardPaste: {
+                if let text = UIPasteboard.general.string {
+                    pasteToActivePane(text)
+                }
+            },
+            onSelectAllAction: { selectionRelay.performSelectAll?() },
             isActive: $isKeyboardActive
         )
         .frame(width: 1, height: 1)

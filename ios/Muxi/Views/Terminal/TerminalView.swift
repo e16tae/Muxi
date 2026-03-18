@@ -18,6 +18,10 @@ struct TerminalView: UIViewRepresentable {
     var scrollOffset: Int = 0
     var onScrollOffsetChanged: ((Int) -> Void)?
 
+    // Selection relay & keyboard reactivation
+    var selectionRelay: TerminalSelectionRelay?
+    var onKeyboardReactivate: (() -> Void)?
+
     // MARK: - UIViewRepresentable
 
     func makeCoordinator() -> Coordinator {
@@ -78,28 +82,35 @@ struct TerminalView: UIViewRepresentable {
         // Trigger initial draw.
         mtkView.setNeedsDisplay()
 
-        let editMenuInteraction = UIEditMenuInteraction(delegate: context.coordinator)
-        mtkView.addInteraction(editMenuInteraction)
-        context.coordinator.editMenuInteraction = editMenuInteraction
+        // Text selection overlay (UITextInput + UITextInteraction).
+        let overlay = TerminalTextOverlay(frame: mtkView.bounds)
+        overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        overlay.buffer = buffer
+        overlay.cellWidth = coordinator.cellWidth
+        overlay.cellHeight = coordinator.cellHeight
+        overlay.onSelectionChanged = { [weak coordinator] range in
+            coordinator?.renderer?.selectionRange = range
+            coordinator?.requestRedraw()
+        }
+        overlay.onPaste = onPaste
+        overlay.onKeyboardReactivate = onKeyboardReactivate
+        mtkView.addSubview(overlay)
+        coordinator.textOverlay = overlay
 
-        let longPress = UILongPressGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleLongPress(_:))
-        )
-        mtkView.addGestureRecognizer(longPress)
+        // Connect relay for ⌘C/⌘A from TerminalInputAccessor.
+        if let relay = selectionRelay {
+            relay.performCopy = { [weak overlay] in overlay?.copy(nil) }
+            relay.performSelectAll = { [weak overlay] in overlay?.selectAll(nil) }
+        }
 
+        // Pan gesture for scrollback — delegate allows simultaneous recognition
+        // with UITextInteraction's own gestures (selection handles/loupe).
         let pan = UIPanGestureRecognizer(
-            target: context.coordinator,
+            target: coordinator,
             action: #selector(Coordinator.handlePan(_:))
         )
-        mtkView.addGestureRecognizer(pan)
-
-        let tap = UITapGestureRecognizer(
-            target: context.coordinator,
-            action: #selector(Coordinator.handleTap(_:))
-        )
-        tap.require(toFail: pan)
-        mtkView.addGestureRecognizer(tap)
+        pan.delegate = coordinator
+        overlay.addGestureRecognizer(pan)
 
         return mtkView
     }
@@ -168,29 +179,39 @@ struct TerminalView: UIViewRepresentable {
             renderer.updateScale(mtkView.contentScaleFactor)
             context.coordinator.requestRedraw()
         }
+
+        // Sync overlay state.
+        context.coordinator.textOverlay?.buffer = buffer
+        context.coordinator.textOverlay?.scrollbackBuffer = scrollbackBuffer
+        context.coordinator.textOverlay?.scrollOffset = scrollOffset
+        context.coordinator.textOverlay?.cellWidth = context.coordinator.cellWidth
+        context.coordinator.textOverlay?.cellHeight = context.coordinator.cellHeight
+        context.coordinator.textOverlay?.onPaste = onPaste
+        context.coordinator.textOverlay?.onKeyboardReactivate = onKeyboardReactivate
+
+        // Re-wire relay when selectionRelay changes.
+        if let relay = selectionRelay {
+            let overlay = context.coordinator.textOverlay
+            relay.performCopy = { [weak overlay] in overlay?.copy(nil) }
+            relay.performSelectAll = { [weak overlay] in overlay?.selectAll(nil) }
+        }
     }
 
     // MARK: - Coordinator
 
-    /// Keeps strong references to the renderer and SSH channel, and
-    /// provides methods for sending keyboard input and handling paste via
-    /// the system edit menu.
-    class Coordinator: NSObject, UIEditMenuInteractionDelegate {
+    /// Keeps strong references to the renderer and manages scrollback
+    /// pan gestures.
+    class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var buffer: TerminalBuffer
         var renderer: TerminalRenderer?
         weak var mtkView: MTKView?
         var currentTheme: Theme
         var onPaste: ((String) -> Void)?
-        var editMenuInteraction: UIEditMenuInteraction?
         var onScrollOffsetChanged: ((Int) -> Void)?
         var cellHeight: CGFloat = 0
         var currentFontSize: CGFloat = 14
-        /// Selection anchor (where long press started), in screen-space row/col.
-        var selectionStart: (row: Int, col: Int)?
-        /// Selection end (current drag position), in screen-space row/col.
-        var selectionEnd: (row: Int, col: Int)?
-        /// Cached cell width for coordinate mapping.
         var cellWidth: CGFloat = 0
+        var textOverlay: TerminalTextOverlay?
         private var accumulatedPanDelta: CGFloat = 0
 
         init(buffer: TerminalBuffer, theme: Theme,
@@ -209,16 +230,15 @@ struct TerminalView: UIViewRepresentable {
             mtkView?.setNeedsDisplay()
         }
 
-        /// Convert a touch point (in the MTKView's coordinate space) to
-        /// a terminal grid position (row, col).
-        func gridPosition(from point: CGPoint) -> (row: Int, col: Int) {
-            guard cellWidth > 0, cellHeight > 0 else { return (0, 0) }
-            let col = max(0, min(Int(point.x / cellWidth), buffer.cols - 1))
-            let row = max(0, min(Int(point.y / cellHeight), buffer.rows - 1))
-            return (row, col)
-        }
-
         // MARK: - Scroll
+
+        // Allow scroll pan to coexist with UITextInteraction's selection gestures.
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
 
         @objc func handlePan(_ gesture: UIPanGestureRecognizer) {
             guard cellHeight > 0 else { return }
@@ -243,106 +263,6 @@ struct TerminalView: UIViewRepresentable {
             default:
                 break
             }
-        }
-
-        // MARK: - Selection & Paste
-
-        @objc func handleLongPress(_ gesture: UILongPressGestureRecognizer) {
-            guard let view = gesture.view else { return }
-            let point = gesture.location(in: view)
-            let pos = gridPosition(from: point)
-
-            switch gesture.state {
-            case .began:
-                // v1: selection only works in live mode (not scrollback).
-                guard renderer?.scrollOffset == 0 else { return }
-                // Start selection at the long-press anchor.
-                selectionStart = pos
-                selectionEnd = pos
-                updateRendererSelection()
-
-            case .changed:
-                guard selectionStart != nil else { return }
-                // Extend selection as finger drags.
-                selectionEnd = pos
-                updateRendererSelection()
-
-            case .ended:
-                guard selectionStart != nil else { return }
-                // Show edit menu at the touch location.
-                selectionEnd = pos
-                updateRendererSelection()
-                if let interaction = editMenuInteraction {
-                    let config = UIEditMenuConfiguration(
-                        identifier: nil, sourcePoint: point
-                    )
-                    interaction.presentEditMenu(with: config)
-                }
-
-            case .cancelled, .failed:
-                clearSelection()
-
-            default:
-                break
-            }
-        }
-
-        @objc func handleTap(_ gesture: UITapGestureRecognizer) {
-            guard gesture.state == .ended else { return }
-            if selectionStart != nil {
-                clearSelection()
-            }
-        }
-
-        private func clearSelection() {
-            selectionStart = nil
-            selectionEnd = nil
-            renderer?.selectionRange = nil
-            requestRedraw()
-        }
-
-        private func updateRendererSelection() {
-            guard let start = selectionStart, let end = selectionEnd else {
-                renderer?.selectionRange = nil
-                return
-            }
-            renderer?.selectionRange = (start: start, end: end)
-            requestRedraw()
-        }
-
-        func editMenuInteraction(
-            _ interaction: UIEditMenuInteraction,
-            menuFor configuration: UIEditMenuConfiguration,
-            suggestedActions: [UIMenuElement]
-        ) -> UIMenu? {
-            var actions: [UIAction] = []
-
-            // Copy action — available when text is selected.
-            if let start = selectionStart, let end = selectionEnd {
-                let copy = UIAction(
-                    title: "Copy",
-                    image: UIImage(systemName: "doc.on.doc")
-                ) { [weak self] _ in
-                    let text = self?.buffer.text(from: start, to: end) ?? ""
-                    UIPasteboard.general.string = text
-                    self?.clearSelection()
-                }
-                actions.append(copy)
-            }
-
-            // Paste action — available when clipboard has text.
-            if UIPasteboard.general.hasStrings {
-                let paste = UIAction(
-                    title: "Paste",
-                    image: UIImage(systemName: "doc.on.clipboard")
-                ) { [weak self] _ in
-                    guard let text = UIPasteboard.general.string else { return }
-                    self?.onPaste?(text)
-                }
-                actions.append(paste)
-            }
-
-            return actions.isEmpty ? nil : UIMenu(children: actions)
         }
     }
 }

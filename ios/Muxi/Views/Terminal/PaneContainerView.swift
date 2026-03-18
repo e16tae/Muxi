@@ -65,6 +65,10 @@ struct PaneContainerView: View {
     var onPaneTapped: ((PaneID) -> Void)?
     var onPaste: ((String) -> Void)?
 
+    // Selection
+    var selectionRelay: TerminalSelectionRelay?
+    var onKeyboardReactivate: (() -> Void)?
+
     // Scrollback
     var scrollbackBuffer: TerminalBuffer?
     var scrollbackOffset: Int = 0
@@ -122,7 +126,9 @@ struct PaneContainerView: View {
                 scrollOffset: scrollbackOffset,
                 onScrollOffsetChanged: { delta in
                     onScrollOffsetChanged?(pane.id, delta)
-                }
+                },
+                selectionRelay: selectionRelay,
+                onKeyboardReactivate: onKeyboardReactivate
             )
             .overlay(alignment: .bottom) {
                 if showNewOutputIndicator,
@@ -187,7 +193,9 @@ struct PaneContainerView: View {
                             scrollOffset: isActive ? scrollbackOffset : 0,
                             onScrollOffsetChanged: { delta in
                                 onScrollOffsetChanged?(pane.id, delta)
-                            }
+                            },
+                            selectionRelay: isActive ? selectionRelay : nil,
+                            onKeyboardReactivate: isActive ? onKeyboardReactivate : nil
                         )
                             .frame(width: frame.width, height: frame.height)
                             .overlay(

@@ -68,6 +68,8 @@ enum MuxiTokens {
         static let body        = Font.system(.body)
         static let caption     = Font.system(.caption)
         static let label       = Font.system(.footnote, weight: .medium)
+        /// Pill typography — larger than label for session/window/pane pills
+        static let pill        = Font.system(.subheadline, weight: .semibold)
         /// Monospaced caption — for command display, code snippets
         static let monoCaption = Font.system(.caption, design: .monospaced)
     }

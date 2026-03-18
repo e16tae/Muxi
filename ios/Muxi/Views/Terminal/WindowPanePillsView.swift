@@ -49,7 +49,7 @@ struct WindowPanePillsView: View {
                 }
             } label: {
                 Text(window.name)
-                    .font(MuxiTokens.Typography.label).fontWeight(.semibold)
+                    .font(MuxiTokens.Typography.pill)
                     .foregroundStyle(isActiveWindow
                         ? MuxiTokens.Colors.textPrimary
                         : MuxiTokens.Colors.textTertiary)
@@ -80,7 +80,7 @@ struct WindowPanePillsView: View {
                         }
                     } label: {
                         Text("\(index)")
-                        .font(MuxiTokens.Typography.label).fontWeight(.semibold)
+                        .font(MuxiTokens.Typography.pill)
                         .foregroundStyle(isActivePane
                             ? MuxiTokens.Colors.textInverse
                             : MuxiTokens.Colors.textTertiary)

@@ -34,7 +34,7 @@ struct SessionPillsView: View {
             }
         } label: {
             Text(session.name)
-                .font(MuxiTokens.Typography.label).fontWeight(.semibold)
+                .font(MuxiTokens.Typography.pill)
                 .foregroundStyle(isActive
                     ? MuxiTokens.Colors.textInverse
                     : MuxiTokens.Colors.textTertiary)

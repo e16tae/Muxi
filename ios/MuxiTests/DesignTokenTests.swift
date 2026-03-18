@@ -87,6 +87,7 @@ struct TypographyTokenTests {
         _ = MuxiTokens.Typography.body
         _ = MuxiTokens.Typography.caption
         _ = MuxiTokens.Typography.label
+        _ = MuxiTokens.Typography.pill
         _ = MuxiTokens.Typography.monoCaption
     }
 }

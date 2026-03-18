@@ -384,6 +384,22 @@ void vt_parser_destroy(VTParserState *parser) {
     parser->buffer = NULL;
 }
 
+void vt_parser_reset(VTParserState *parser) {
+    if (!parser || !parser->buffer) return;
+    int32_t cols = parser->cols;
+    int32_t rows = parser->rows;
+    VTCell *buffer = parser->buffer;
+    memset(parser, 0, sizeof(VTParserState));
+    parser->buffer = buffer;
+    parser->cols = cols;
+    parser->rows = rows;
+    parser->scroll_top = 0;
+    parser->scroll_bottom = rows - 1;
+    parser->cursor_visible = 1;
+    parser->cursor_style = 0;
+    memset(buffer, 0, (size_t)cols * (size_t)rows * sizeof(VTCell));
+}
+
 void vt_parser_feed(VTParserState *parser, const char *data, int32_t len) {
     if (!parser || !data || len <= 0) return;
 

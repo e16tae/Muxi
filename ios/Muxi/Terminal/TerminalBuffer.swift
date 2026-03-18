@@ -142,6 +142,14 @@ final class TerminalBuffer {
         vt_parser_set_cursor(&parser, Int32(row), Int32(col))
     }
 
+    // MARK: Reset
+
+    /// Reset the buffer to its initial empty state, preserving dimensions
+    /// and the buffer's identity (so existing references and onUpdate remain valid).
+    func resetContent() {
+        vt_parser_reset(&parser)
+    }
+
     // MARK: Resize
 
     /// Resize the terminal grid. Existing content is preserved where possible.

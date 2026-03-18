@@ -738,15 +738,12 @@ final class ConnectionManager {
         scrolledBackPanes = []
         paneHasNewOutput = []
 
-        // Send switch-client followed by refresh-client to ensure the new
-        // session's window is resized to match our terminal dimensions.
+        // Send only switch-client — onSessionChanged will send
+        // refresh-client to trigger %layout-change for the new session.
+        // Sending refresh-client here too causes a redundant SIGWINCH
+        // that accumulates extra prompt lines in the pane buffer.
         try await sendControlCommand(
             "switch-client -t \(sessionName.shellEscaped())\n", type: .ignored)
-        let (cols, rows) = lastSentSize
-        if cols > 0, rows > 0 {
-            try await sendControlCommand(
-                "refresh-client -C \(cols),\(rows)\n", type: .ignored)
-        }
     }
 
     /// Create a new tmux session and switch to it.
@@ -853,15 +850,12 @@ final class ConnectionManager {
         autoZoomTimeoutTask?.cancel()
         autoZoomTimeoutTask = Task {
             try? await Task.sleep(for: .seconds(2))
-            // Timeout: fall back to active state with unzoomed panes
             if case .autoZooming(let s) = self.windowPaneState {
-                self.windowPaneState = .active(
-                    WindowPaneState.ActiveState(
-                        windowId: s.windowId,
-                        panes: s.unzoomedPanes,
-                        activePaneId: s.activePaneId,
-                        isZoomed: false
-                    )
+                self.applyLayout(
+                    windowId: s.windowId,
+                    panes: s.unzoomedPanes,
+                    activePaneId: s.activePaneId,
+                    isZoomed: false
                 )
             }
         }
@@ -976,18 +970,27 @@ final class ConnectionManager {
             schedulePaneRefresh(for: windowId)
         }
 
-        // Create TerminalBuffer for any new panes.
-        var newPaneIds: [PaneID] = []
+        // Create or resize TerminalBuffer for each pane.
+        // Track which panes need a capture-pane refresh.
+        var paneIdsToCapture: [PaneID] = []
         for pane in panes {
             if paneBuffers[pane.id] == nil {
                 paneBuffers[pane.id] = TerminalBuffer(
                     cols: pane.frame.width, rows: pane.frame.height
                 )
-                newPaneIds.append(pane.id)
+                paneIdsToCapture.append(pane.id)
             } else {
                 paneBuffers[pane.id]?.resize(
                     cols: pane.frame.width, rows: pane.frame.height
                 )
+                // Zoomed panes carry stale content from their unzoomed
+                // dimensions.  In control mode tmux doesn't redraw the
+                // screen on zoom switch — only the shell's partial
+                // SIGWINCH redraw arrives via %output.  Capture-pane
+                // fetches the authoritative screen state from tmux.
+                if isZoomed {
+                    paneIdsToCapture.append(pane.id)
+                }
             }
         }
         // Remove buffers for panes that no longer exist.
@@ -998,9 +1001,9 @@ final class ConnectionManager {
             }
         }
 
-        // Request initial screen content for newly created panes.
+        // Refresh screen content for new panes and zoomed existing panes.
         if !pendingInitialResize {
-            for paneId in newPaneIds {
+            for paneId in paneIdsToCapture {
                 Task {
                     try? await self.sendControlCommand(
                         "capture-pane -e -p -t \(paneId.rawValue.shellEscaped())\n",
@@ -1464,28 +1467,15 @@ final class ConnectionManager {
 
             switch pending {
             case .capturePane(let paneId):
-                if !response.isEmpty, let oldBuffer = self.paneBuffers[paneId] {
-                    // Replace with a fresh buffer to avoid mixing with
-                    // %output data that arrived between buffer creation
-                    // and this capture-pane response.
-                    let fresh = TerminalBuffer(cols: oldBuffer.cols, rows: oldBuffer.rows)
-                    // capture-pane -e -p uses bare \n between lines, but the
-                    // VT parser's \n only increments cursor_row (no CR).
-                    // Normalize to \r\n so each line starts at column 0.
-                    //
-                    // Strip trailing empty lines — capture-pane includes every
-                    // row of the visible area, so blank rows below the prompt
-                    // push the VT cursor to the bottom of the grid.  The
-                    // paired cursorQuery (sent right after this capture-pane)
-                    // sets the exact position, but trimming keeps the cursor
-                    // close to correct even before the query response arrives.
+                if !response.isEmpty, let buffer = self.paneBuffers[paneId] {
+                    // Reset in-place so TerminalView's reference and onUpdate stay valid.
+                    buffer.resetContent()
                     var trimmed = response
                     while trimmed.hasSuffix("\n") {
                         trimmed = String(trimmed.dropLast())
                     }
                     let normalized = trimmed.replacingOccurrences(of: "\n", with: "\r\n")
-                    fresh.feed(normalized)
-                    self.paneBuffers[paneId] = fresh
+                    buffer.feed(normalized)
                 }
             case .cursorQuery(let paneId):
                 // Response format: "col:row" (0-based).

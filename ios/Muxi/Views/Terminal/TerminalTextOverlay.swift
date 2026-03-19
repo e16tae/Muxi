@@ -1,3 +1,4 @@
+import os
 import UIKit
 
 // MARK: - Text Position & Range
@@ -55,12 +56,17 @@ final class TerminalSelectionRectValue: UITextSelectionRect {
 
 // MARK: - TerminalTextOverlay
 
-/// Transparent overlay on the MTKView that implements ``UITextInput``
-/// with ``UITextInteraction(.nonEditable)`` to provide iOS-standard
-/// text selection: handles, loupe, double-tap word selection, triple-tap
-/// line selection, and the system edit menu.
+/// Transparent overlay on the MTKView that serves as the sole first responder
+/// for both keyboard input and text selection.
 ///
-/// Keyboard input remains on ``TerminalInputAccessor`` (UIKeyInput).
+/// Combines ``UITextInput`` (text selection, copy/paste) with ``UIKeyInput``
+/// (keyboard character input) in a single view, eliminating the need for
+/// first-responder transfers that cause keyboard dismiss/re-show cycles.
+///
+/// Uses ``UITextInteraction(.editable)`` for iOS-standard text selection
+/// (handles, loupe, double-tap word, triple-tap line, system edit menu).
+/// Hardware keyboard shortcuts (arrows, Ctrl, Alt, ⌘C/V/A) are handled
+/// via ``keyCommands``.
 final class TerminalTextOverlay: UIView, UITextInput {
 
     // MARK: - External references (set by Coordinator)
@@ -75,7 +81,12 @@ final class TerminalTextOverlay: UIView, UITextInput {
 
     var onSelectionChanged: (((start: (row: Int, col: Int), end: (row: Int, col: Int))?) -> Void)?
     var onPaste: ((String) -> Void)?
-    var onKeyboardReactivate: (() -> Void)?
+
+    // Keyboard input callbacks (merged from TerminalInputAccessor)
+    var onText: ((String) -> Void)?
+    var onDelete: (() -> Void)?
+    var onSpecialKey: ((SpecialKey) -> Void)?
+    var onRawData: ((Data) -> Void)?
 
     // MARK: - UITextInput required properties
 
@@ -93,7 +104,7 @@ final class TerminalTextOverlay: UIView, UITextInput {
         backgroundColor = .clear
         isUserInteractionEnabled = true
 
-        textInteraction = UITextInteraction(for: .nonEditable)
+        textInteraction = UITextInteraction(for: .editable)
         textInteraction.textInput = self
         addInteraction(textInteraction)
     }
@@ -104,6 +115,25 @@ final class TerminalTextOverlay: UIView, UITextInput {
     // MARK: - First Responder
 
     override var canBecomeFirstResponder: Bool { true }
+
+    // MARK: - Activation
+
+    func activate() {
+        if !isFirstResponder { becomeFirstResponder() }
+    }
+
+    func deactivate() {
+        if isFirstResponder { resignFirstResponder() }
+    }
+
+    // MARK: - UITextInputTraits
+
+    var keyboardType: UIKeyboardType = .default
+    var autocorrectionType: UITextAutocorrectionType = .no
+    var autocapitalizationType: UITextAutocapitalizationType = .none
+    var smartQuotesType: UITextSmartQuotesType = .no
+    var smartDashesType: UITextSmartDashesType = .no
+    var spellCheckingType: UITextSpellCheckingType = .no
 
     // MARK: - Grid helpers
 
@@ -334,13 +364,25 @@ final class TerminalTextOverlay: UIView, UITextInput {
         return buffer?.text(from: from, to: to)
     }
 
-    // MARK: - UIKeyInput stubs (nonEditable — no text mutation)
+    // MARK: - UIKeyInput
 
     var hasText: Bool { true }
-    func insertText(_ text: String) { }
-    func deleteBackward() { }
 
-    // MARK: - Marked text stubs (nonEditable)
+    func insertText(_ text: String) {
+        #if DEBUG
+        if text == "\n" || text == "\r" {
+            let trace = Thread.callStackSymbols.prefix(10).joined(separator: "\n")
+            os_log(.debug, "⚠️ insertText NEWLINE — stack:\n%{public}@", trace)
+        }
+        #endif
+        onText?(text)
+    }
+
+    func deleteBackward() {
+        onDelete?()
+    }
+
+    // MARK: - Marked text stubs
 
     var markedTextRange: UITextRange? { nil }
     var markedTextStyle: [NSAttributedString.Key: Any]? {
@@ -365,14 +407,12 @@ final class TerminalTextOverlay: UIView, UITextInput {
               let text = text(in: range) else { return }
         UIPasteboard.general.string = text
         selectedTextRange = nil
-        onKeyboardReactivate?()
     }
 
     override func paste(_ sender: Any?) {
         guard let text = UIPasteboard.general.string else { return }
         onPaste?(text)
         selectedTextRange = nil
-        onKeyboardReactivate?()
     }
 
     override func selectAll(_ sender: Any?) {
@@ -393,6 +433,99 @@ final class TerminalTextOverlay: UIView, UITextInput {
             return true
         default:
             return false
+        }
+    }
+
+    // MARK: - Hardware Keyboard
+
+    /// Cached key commands for hardware keyboard support.
+    /// Arrows, Escape, Tab, Ctrl+a...z, Alt+a...z, ⌘C/V/A (~58 entries).
+    private static let _keyCommands: [UIKeyCommand] = {
+        var commands: [UIKeyCommand] = []
+        let sel = #selector(handleKeyCommand(_:))
+
+        // Arrow keys.
+        commands.append(UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: sel))
+        commands.append(UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: sel))
+        commands.append(UIKeyCommand(input: UIKeyCommand.inputLeftArrow, modifierFlags: [], action: sel))
+        commands.append(UIKeyCommand(input: UIKeyCommand.inputRightArrow, modifierFlags: [], action: sel))
+
+        // Escape.
+        commands.append(UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: sel))
+
+        // Tab — override iOS focus navigation.
+        let tab = UIKeyCommand(input: "\t", modifierFlags: [], action: sel)
+        tab.wantsPriorityOverSystemBehavior = true
+        commands.append(tab)
+
+        // Ctrl+letter (a-z).
+        for scalar in UnicodeScalar("a").value...UnicodeScalar("z").value {
+            let char = String(UnicodeScalar(scalar)!)
+            commands.append(UIKeyCommand(input: char, modifierFlags: .control, action: sel))
+        }
+
+        // Alt+letter (a-z).
+        for scalar in UnicodeScalar("a").value...UnicodeScalar("z").value {
+            let char = String(UnicodeScalar(scalar)!)
+            commands.append(UIKeyCommand(input: char, modifierFlags: .alternate, action: sel))
+        }
+
+        // ⌘C, ⌘V, ⌘A — clipboard & selection shortcuts.
+        commands.append(UIKeyCommand(input: "c", modifierFlags: .command, action: sel))
+        commands.append(UIKeyCommand(input: "v", modifierFlags: .command, action: sel))
+        commands.append(UIKeyCommand(input: "a", modifierFlags: .command, action: sel))
+
+        return commands
+    }()
+
+    override var keyCommands: [UIKeyCommand]? {
+        Self._keyCommands
+    }
+
+    @objc private func handleKeyCommand(_ command: UIKeyCommand) {
+        guard let input = command.input else { return }
+
+        // Special keys (no modifier).
+        if command.modifierFlags.isEmpty || command.modifierFlags == .numericPad {
+            let specialKey: SpecialKey?
+            switch input {
+            case UIKeyCommand.inputUpArrow:    specialKey = .arrowUp
+            case UIKeyCommand.inputDownArrow:  specialKey = .arrowDown
+            case UIKeyCommand.inputLeftArrow:  specialKey = .arrowLeft
+            case UIKeyCommand.inputRightArrow: specialKey = .arrowRight
+            case UIKeyCommand.inputEscape:     specialKey = .escape
+            case "\t":                         specialKey = .tab
+            default:                           specialKey = nil
+            }
+            if let key = specialKey {
+                onSpecialKey?(key)
+                return
+            }
+        }
+
+        // ⌘+letter — handled directly by the overlay.
+        if command.modifierFlags.contains(.command) {
+            switch input {
+            case "c": copy(nil)
+            case "v": paste(nil)
+            case "a": selectAll(nil)
+            default: break
+            }
+            return
+        }
+
+        // Ctrl+letter.
+        if command.modifierFlags.contains(.control) {
+            let data = InputHandler.terminalData(for: input, ctrl: true)
+            onRawData?(data)
+            return
+        }
+
+        // Alt+letter.
+        if command.modifierFlags.contains(.alternate) {
+            let data = InputHandler.terminalData(for: input, alt: true)
+            onRawData?(data)
+            return
         }
     }
 }

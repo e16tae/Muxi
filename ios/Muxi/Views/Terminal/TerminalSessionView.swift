@@ -26,7 +26,6 @@ struct TerminalSessionView: View {
     @State private var renameTarget: ToolbarView.RenameTarget?
     @State private var renameText = ""
 
-    @State private var selectionRelay = TerminalSelectionRelay()
     @State private var panes: [PaneContainerView.PaneInfo] = []
 
     private func buildPaneInfos() -> [PaneContainerView.PaneInfo] {
@@ -82,14 +81,31 @@ struct TerminalSessionView: View {
                         set: { connectionManager.activePaneId = $0 }
                     ),
                     onPaneTapped: { paneId in
-                        isKeyboardActive = true
                         sendTmuxCommand("select-pane -t \(paneId.rawValue.shellEscaped()) -Z")
                     },
                     onPaste: { text in
                         pasteToActivePane(text)
                     },
-                    selectionRelay: selectionRelay,
-                    onKeyboardReactivate: { isKeyboardActive = true },
+                    onText: { text in
+                        for char in text {
+                            let data = inputHandler.data(for: char)
+                            sendToActivePane(data)
+                        }
+                    },
+                    onDelete: {
+                        sendToActivePane(Data([0x7F]))
+                    },
+                    onSpecialKey: { key in
+                        let data = inputHandler.data(for: key)
+                        sendToActivePane(data)
+                    },
+                    onRawData: { data in
+                        sendToActivePane(data)
+                    },
+                    isKeyboardActive: isKeyboardActive,
+                    onKeyboardDismissed: {
+                        isKeyboardActive = false
+                    },
                     scrollbackBuffer: activeScrollbackBuffer,
                     scrollbackOffset: activeScrollbackOffset,
                     onScrollOffsetChanged: { paneId, delta in
@@ -132,7 +148,6 @@ struct TerminalSessionView: View {
                 }
             },
             onSelectWindowAndPane: { windowId, paneId in
-                isKeyboardActive = true
                 Task {
                     try? await connectionManager.selectWindowAndPane(
                         windowId: windowId, paneId: paneId)
@@ -172,53 +187,16 @@ struct TerminalSessionView: View {
         }
     }
 
-    private var hiddenInputArea: some View {
-        TerminalInputView(
-            onText: { text in
-                for char in text {
-                    let data = inputHandler.data(for: char)
-                    sendToActivePane(data)
-                }
-            },
-            onDelete: {
-                sendToActivePane(Data([0x7F]))
-            },
-            onSpecialKey: { key in
-                let data = inputHandler.data(for: key)
-                sendToActivePane(data)
-            },
-            onRawData: { data in
-                sendToActivePane(data)
-            },
-            onCopyAction: { selectionRelay.performCopy?() },
-            onClipboardPaste: {
-                if let text = UIPasteboard.general.string {
-                    pasteToActivePane(text)
-                }
-            },
-            onSelectAllAction: { selectionRelay.performSelectAll?() },
-            isActive: $isKeyboardActive
-        )
-        .frame(width: 1, height: 1)
-        .opacity(0)
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             terminalContentArea
             toolbarArea
             keyboardArea
-            hiddenInputArea
         }
         .background(
             themeManager.currentTheme.background.color
                 .ignoresSafeArea()
         )
-        .onChange(of: connectionManager.activePaneId) { _, newValue in
-            if newValue != nil {
-                isKeyboardActive = true
-            }
-        }
         .onAppear {
             connectionManager.mobileAutoZoom = (sizeClass == .compact)
             panes = buildPaneInfos()

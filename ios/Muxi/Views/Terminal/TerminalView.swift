@@ -4,8 +4,8 @@ import MetalKit
 /// A single terminal pane rendered with Metal.
 ///
 /// Wraps an ``MTKView`` and ``TerminalRenderer`` via `UIViewRepresentable`.
-/// The Metal renderer is stored in the ``Coordinator`` to maintain a strong
-/// reference for the lifetime of the view.
+/// The ``TerminalTextOverlay`` subview serves as the sole first responder
+/// for both keyboard input and text selection.
 struct TerminalView: UIViewRepresentable {
     let buffer: TerminalBuffer
     let theme: Theme
@@ -18,9 +18,15 @@ struct TerminalView: UIViewRepresentable {
     var scrollOffset: Int = 0
     var onScrollOffsetChanged: ((Int) -> Void)?
 
-    // Selection relay & keyboard reactivation
-    var selectionRelay: TerminalSelectionRelay?
-    var onKeyboardReactivate: (() -> Void)?
+    // Keyboard input (forwarded to overlay)
+    var onText: ((String) -> Void)?
+    var onDelete: (() -> Void)?
+    var onSpecialKey: ((SpecialKey) -> Void)?
+    var onRawData: ((Data) -> Void)?
+
+    // Keyboard state
+    var isKeyboardActive: Bool = false
+    var onKeyboardDismissed: (() -> Void)?
 
     // MARK: - UIViewRepresentable
 
@@ -82,7 +88,7 @@ struct TerminalView: UIViewRepresentable {
         // Trigger initial draw.
         mtkView.setNeedsDisplay()
 
-        // Text selection overlay (UITextInput + UITextInteraction).
+        // Terminal overlay — sole first responder for input + selection.
         let overlay = TerminalTextOverlay(frame: mtkView.bounds)
         overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         overlay.buffer = buffer
@@ -93,15 +99,12 @@ struct TerminalView: UIViewRepresentable {
             coordinator?.requestRedraw()
         }
         overlay.onPaste = onPaste
-        overlay.onKeyboardReactivate = onKeyboardReactivate
+        overlay.onText = onText
+        overlay.onDelete = onDelete
+        overlay.onSpecialKey = onSpecialKey
+        overlay.onRawData = onRawData
         mtkView.addSubview(overlay)
         coordinator.textOverlay = overlay
-
-        // Connect relay for ⌘C/⌘A from TerminalInputAccessor.
-        if let relay = selectionRelay {
-            relay.performCopy = { [weak overlay] in overlay?.copy(nil) }
-            relay.performSelectAll = { [weak overlay] in overlay?.selectAll(nil) }
-        }
 
         // Pan gesture for scrollback — delegate allows simultaneous recognition
         // with UITextInteraction's own gestures (selection handles/loupe).
@@ -112,12 +115,16 @@ struct TerminalView: UIViewRepresentable {
         pan.delegate = coordinator
         overlay.addGestureRecognizer(pan)
 
+        coordinator.onKeyboardDismissed = onKeyboardDismissed
+        coordinator.startObservingKeyboard()
+
         return mtkView
     }
 
     func updateUIView(_ mtkView: MTKView, context: Context) {
         // Update coordinator references in case they changed (e.g. after reconnect)
         context.coordinator.onPaste = onPaste
+        context.coordinator.onKeyboardDismissed = onKeyboardDismissed
 
         // Update scrollback state on renderer.
         let offsetChanged = context.coordinator.renderer?.scrollOffset != scrollOffset
@@ -181,26 +188,32 @@ struct TerminalView: UIViewRepresentable {
         }
 
         // Sync overlay state.
-        context.coordinator.textOverlay?.buffer = buffer
-        context.coordinator.textOverlay?.scrollbackBuffer = scrollbackBuffer
-        context.coordinator.textOverlay?.scrollOffset = scrollOffset
-        context.coordinator.textOverlay?.cellWidth = context.coordinator.cellWidth
-        context.coordinator.textOverlay?.cellHeight = context.coordinator.cellHeight
-        context.coordinator.textOverlay?.onPaste = onPaste
-        context.coordinator.textOverlay?.onKeyboardReactivate = onKeyboardReactivate
+        let overlay = context.coordinator.textOverlay
+        overlay?.buffer = buffer
+        overlay?.scrollbackBuffer = scrollbackBuffer
+        overlay?.scrollOffset = scrollOffset
+        overlay?.cellWidth = context.coordinator.cellWidth
+        overlay?.cellHeight = context.coordinator.cellHeight
+        overlay?.onPaste = onPaste
+        overlay?.onText = onText
+        overlay?.onDelete = onDelete
+        overlay?.onSpecialKey = onSpecialKey
+        overlay?.onRawData = onRawData
 
-        // Re-wire relay when selectionRelay changes.
-        if let relay = selectionRelay {
-            let overlay = context.coordinator.textOverlay
-            relay.performCopy = { [weak overlay] in overlay?.copy(nil) }
-            relay.performSelectAll = { [weak overlay] in overlay?.selectAll(nil) }
+        // Manage keyboard (overlay first responder) state.
+        if let overlay, isKeyboardActive != overlay.isFirstResponder {
+            if isKeyboardActive {
+                overlay.activate()
+            } else {
+                overlay.deactivate()
+            }
         }
     }
 
     // MARK: - Coordinator
 
-    /// Keeps strong references to the renderer and manages scrollback
-    /// pan gestures.
+    /// Keeps strong references to the renderer, manages scrollback
+    /// pan gestures, and observes keyboard dismiss notifications.
     class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var buffer: TerminalBuffer
         var renderer: TerminalRenderer?
@@ -208,11 +221,13 @@ struct TerminalView: UIViewRepresentable {
         var currentTheme: Theme
         var onPaste: ((String) -> Void)?
         var onScrollOffsetChanged: ((Int) -> Void)?
+        var onKeyboardDismissed: (() -> Void)?
         var cellHeight: CGFloat = 0
         var currentFontSize: CGFloat = 14
         var cellWidth: CGFloat = 0
         var textOverlay: TerminalTextOverlay?
         private var accumulatedPanDelta: CGFloat = 0
+        private var keyboardObserver: Any?
 
         init(buffer: TerminalBuffer, theme: Theme,
              onPaste: ((String) -> Void)?,
@@ -228,6 +243,28 @@ struct TerminalView: UIViewRepresentable {
         func requestRedraw() {
             renderer?.needsRedraw = true
             mtkView?.setNeedsDisplay()
+        }
+
+        // MARK: - Keyboard Observer
+
+        func startObservingKeyboard() {
+            keyboardObserver = NotificationCenter.default.addObserver(
+                forName: UIResponder.keyboardDidHideNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                // Guard against view teardown: if the overlay has been removed
+                // from the window, don't update — its owning @State may be
+                // mid-deallocation (causes crash on disconnect).
+                guard let self, self.textOverlay?.window != nil else { return }
+                self.onKeyboardDismissed?()
+            }
+        }
+
+        deinit {
+            if let observer = keyboardObserver {
+                NotificationCenter.default.removeObserver(observer)
+            }
         }
 
         // MARK: - Scroll

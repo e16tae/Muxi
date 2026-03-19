@@ -65,9 +65,15 @@ struct PaneContainerView: View {
     var onPaneTapped: ((PaneID) -> Void)?
     var onPaste: ((String) -> Void)?
 
-    // Selection
-    var selectionRelay: TerminalSelectionRelay?
-    var onKeyboardReactivate: (() -> Void)?
+    // Keyboard input (forwarded to active pane's overlay)
+    var onText: ((String) -> Void)?
+    var onDelete: (() -> Void)?
+    var onSpecialKey: ((SpecialKey) -> Void)?
+    var onRawData: ((Data) -> Void)?
+
+    // Keyboard state
+    var isKeyboardActive: Bool = false
+    var onKeyboardDismissed: (() -> Void)?
 
     // Scrollback
     var scrollbackBuffer: TerminalBuffer?
@@ -127,8 +133,12 @@ struct PaneContainerView: View {
                 onScrollOffsetChanged: { delta in
                     onScrollOffsetChanged?(pane.id, delta)
                 },
-                selectionRelay: selectionRelay,
-                onKeyboardReactivate: onKeyboardReactivate
+                onText: onText,
+                onDelete: onDelete,
+                onSpecialKey: onSpecialKey,
+                onRawData: onRawData,
+                isKeyboardActive: isKeyboardActive,
+                onKeyboardDismissed: onKeyboardDismissed
             )
             .overlay(alignment: .bottom) {
                 if showNewOutputIndicator,
@@ -194,8 +204,12 @@ struct PaneContainerView: View {
                             onScrollOffsetChanged: { delta in
                                 onScrollOffsetChanged?(pane.id, delta)
                             },
-                            selectionRelay: isActive ? selectionRelay : nil,
-                            onKeyboardReactivate: isActive ? onKeyboardReactivate : nil
+                            onText: isActive ? onText : nil,
+                            onDelete: isActive ? onDelete : nil,
+                            onSpecialKey: isActive ? onSpecialKey : nil,
+                            onRawData: isActive ? onRawData : nil,
+                            isKeyboardActive: isActive ? isKeyboardActive : false,
+                            onKeyboardDismissed: isActive ? onKeyboardDismissed : nil
                         )
                             .frame(width: frame.width, height: frame.height)
                             .overlay(

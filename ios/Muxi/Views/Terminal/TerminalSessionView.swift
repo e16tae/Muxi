@@ -16,7 +16,7 @@ struct TerminalSessionView: View {
 
     private let logger = Logger(subsystem: "com.muxi.app", category: "TerminalSession")
     @State private var inputHandler = InputHandler()
-    @State private var isKeyboardActive = false
+    @State private var isKeyboardActive = true
     @State private var scrollbackManager = ScrollbackManager()
     @State private var showNewSessionAlert = false
     @State private var newSessionName = ""

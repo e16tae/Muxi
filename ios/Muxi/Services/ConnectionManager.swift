@@ -980,15 +980,21 @@ final class ConnectionManager {
                 )
                 paneIdsToCapture.append(pane.id)
             } else {
+                let oldCols = paneBuffers[pane.id]!.cols
+                let oldRows = paneBuffers[pane.id]!.rows
                 paneBuffers[pane.id]?.resize(
                     cols: pane.frame.width, rows: pane.frame.height
                 )
-                // Zoomed panes carry stale content from their unzoomed
-                // dimensions.  In control mode tmux doesn't redraw the
-                // screen on zoom switch — only the shell's partial
-                // SIGWINCH redraw arrives via %output.  Capture-pane
-                // fetches the authoritative screen state from tmux.
-                if isZoomed {
+                // Capture-pane is needed when:
+                // 1. Zoomed panes carry stale content from their unzoomed
+                //    dimensions.  In control mode tmux doesn't redraw the
+                //    screen on zoom switch — only the shell's partial
+                //    SIGWINCH redraw arrives via %output.
+                // 2. Buffer dimensions changed — our local VT parser copies
+                //    existing cells but new rows/cols stay empty.  tmux has
+                //    the authoritative reflowed content.
+                let sizeChanged = pane.frame.width != oldCols || pane.frame.height != oldRows
+                if isZoomed || sizeChanged {
                     paneIdsToCapture.append(pane.id)
                 }
             }

@@ -38,6 +38,8 @@ targets:
         embed: false
       - framework: ../vendor/openssl.xcframework
         embed: false
+      - framework: ../vendor/libtailscale.xcframework
+        embed: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.muxi.app

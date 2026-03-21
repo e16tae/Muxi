@@ -43,6 +43,10 @@ final class ConnectionManager {
     private let tmuxService = TmuxControlService()
     private let keychainService = KeychainService()
     private let lastSessionStore: LastSessionStore
+    private let tailscaleService = TailscaleService()
+
+    /// Current Tailscale node state, observable by UI.
+    private(set) var tailscaleState: TailscaleState = .disconnected
 
     /// The current connection state.
     private(set) var state: ConnectionState = .disconnected
@@ -396,12 +400,25 @@ final class ConnectionManager {
             cachedAuth = auth
             logger.info("Auth resolved, starting SSH connect...")
 
+            var tailscaleFD: Int32? = nil
+            if server.useTailscale {
+                guard tailscaleState == .connected else {
+                    logger.error("Tailscale not connected — cannot connect to server \(server.host)")
+                    state = .disconnected
+                    currentServer = nil
+                    throw TailscaleError.notConnected
+                }
+                tailscaleFD = try await tailscaleService.dial(host: server.host, port: server.port)
+                logger.info("Got Tailscale fd=\(tailscaleFD!) for \(server.host):\(server.port)")
+            }
+
             try await sshService.connect(
                 host: server.host,
                 port: server.port,
                 username: server.username,
                 auth: auth,
-                expectedFingerprint: server.hostKeyFingerprint
+                expectedFingerprint: server.hostKeyFingerprint,
+                tailscaleFD: tailscaleFD
             )
             logger.info("SSH connected, querying tmux sessions...")
 
@@ -455,6 +472,28 @@ final class ConnectionManager {
             cachedAuth = nil
             throw error
         }
+    }
+
+    // MARK: - Tailscale Lifecycle
+
+    /// Start the embedded Tailscale node.
+    func startTailscale(controlURL: String, authKey: String, hostname: String) async {
+        do {
+            tailscaleState = .connecting
+            try await tailscaleService.start(controlURL: controlURL, authKey: authKey, hostname: hostname)
+            tailscaleState = .connected
+            logger.info("Tailscale connected")
+        } catch {
+            tailscaleState = .error(error.localizedDescription)
+            logger.error("Tailscale start failed: \(error)")
+        }
+    }
+
+    /// Stop the embedded Tailscale node.
+    func stopTailscale() async {
+        await tailscaleService.stop()
+        tailscaleState = .disconnected
+        logger.info("Tailscale disconnected")
     }
 
     /// Handle host key verification errors during the connect flow.

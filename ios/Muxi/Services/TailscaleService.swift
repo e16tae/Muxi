@@ -3,10 +3,21 @@ import os
 
 // MARK: - TailscaleError
 
-enum TailscaleError: Error, Equatable {
+enum TailscaleError: Error, Equatable, LocalizedError {
     case notConnected
     case dialFailed(String)
     case startFailed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .notConnected:
+            "Tailscale에 먼저 연결하세요"
+        case .dialFailed(let msg):
+            "Tailscale 연결 실패: \(msg)"
+        case .startFailed(let msg):
+            "Tailscale 시작 실패: \(msg)"
+        }
+    }
 }
 
 // MARK: - TailscaleState

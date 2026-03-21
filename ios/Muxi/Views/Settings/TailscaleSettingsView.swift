@@ -68,7 +68,7 @@ struct TailscaleSettingsView: View {
                 Text(isConnected ? "Disconnect" : "Connect")
                     .frame(maxWidth: .infinity)
             }
-            .disabled(!configStore.isConfigured && !isConnected)
+            .disabled((controlURL.isEmpty || preAuthKey.isEmpty) && !isConnected)
             .listRowBackground(MuxiTokens.Colors.surfaceDefault)
         }
     }

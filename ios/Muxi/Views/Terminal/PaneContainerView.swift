@@ -73,7 +73,6 @@ struct PaneContainerView: View {
 
     // Keyboard state
     var isKeyboardActive: Bool = false
-    var onKeyboardDismissed: (() -> Void)?
 
     // Scrollback
     var scrollbackBuffer: TerminalBuffer?
@@ -137,8 +136,7 @@ struct PaneContainerView: View {
                 onDelete: onDelete,
                 onSpecialKey: onSpecialKey,
                 onRawData: onRawData,
-                isKeyboardActive: isKeyboardActive,
-                onKeyboardDismissed: onKeyboardDismissed
+                isKeyboardActive: isKeyboardActive
             )
             .overlay(alignment: .bottom) {
                 if showNewOutputIndicator,
@@ -208,8 +206,7 @@ struct PaneContainerView: View {
                             onDelete: isActive ? onDelete : nil,
                             onSpecialKey: isActive ? onSpecialKey : nil,
                             onRawData: isActive ? onRawData : nil,
-                            isKeyboardActive: isActive ? isKeyboardActive : false,
-                            onKeyboardDismissed: isActive ? onKeyboardDismissed : nil
+                            isKeyboardActive: isActive ? isKeyboardActive : false
                         )
                             .frame(width: frame.width, height: frame.height)
                             .overlay(

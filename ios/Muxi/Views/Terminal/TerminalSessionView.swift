@@ -103,9 +103,6 @@ struct TerminalSessionView: View {
                         sendToActivePane(data)
                     },
                     isKeyboardActive: isKeyboardActive,
-                    onKeyboardDismissed: {
-                        isKeyboardActive = false
-                    },
                     scrollbackBuffer: activeScrollbackBuffer,
                     scrollbackOffset: activeScrollbackOffset,
                     onScrollOffsetChanged: { paneId, delta in
@@ -286,6 +283,14 @@ struct TerminalSessionView: View {
     /// Calculate terminal columns and rows from the available view size
     /// and notify tmux so TUI apps can adapt.
     private func updateTerminalSize(_ size: CGSize) {
+        // Skip resize while keyboard is expected but not yet visible.
+        // During session/window switch the view is recreated and
+        // GeometryReader briefly reports the full-screen size (no keyboard).
+        // Sending that larger size causes tmux to capture-pane with wrong
+        // dimensions.  Once the keyboard actually appears, onChange fires
+        // again with the correct (smaller) size.
+        if isKeyboardActive && !isKeyboardVisible { return }
+
         let (cellW, cellH) = Self.terminalCellSize(fontSize: themeManager.fontSize)
         guard cellW > 0, cellH > 0 else { return }
 

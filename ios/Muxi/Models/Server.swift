@@ -55,6 +55,9 @@ final class Server {
     /// Stored in SwiftData (not a secret — safe for model storage).
     var hostKeyFingerprint: String?
 
+    /// Whether SSH connections to this server should route through Tailscale.
+    var useTailscale: Bool = false
+
     init(
         id: UUID = UUID(),
         name: String,

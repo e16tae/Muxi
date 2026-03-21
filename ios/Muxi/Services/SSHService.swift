@@ -134,11 +134,13 @@ protocol SSHServiceProtocol: AnyObject {
     ///   - auth: The authentication credentials.
     ///   - expectedFingerprint: The previously stored host key fingerprint.
     ///     Pass `nil` for first connections (triggers TOFU verification).
+    ///   - tailscaleFD: An already-connected socket fd from TailscaleService.
+    ///     When provided, DNS resolution and socket creation are skipped.
     ///
     /// - Throws: ``SSHHostKeyError/fingerprintVerificationNeeded(fingerprint:)``
     ///   on first connection, ``SSHHostKeyError/fingerprintMismatch(expected:actual:)``
     ///   if the host key has changed, or other ``SSHError`` for connection failures.
-    func connect(host: String, port: UInt16, username: String, auth: SSHAuth, expectedFingerprint: String?) async throws
+    func connect(host: String, port: UInt16, username: String, auth: SSHAuth, expectedFingerprint: String?, tailscaleFD: Int32?) async throws
 
     /// Tear down the current connection.
     func disconnect()
@@ -164,6 +166,13 @@ protocol SSHServiceProtocol: AnyObject {
     /// Close the active shell channel and stop the read loop without
     /// tearing down the underlying SSH session.
     func closeShell() async
+}
+
+extension SSHServiceProtocol {
+    /// Convenience overload that defaults `tailscaleFD` to `nil`.
+    func connect(host: String, port: UInt16, username: String, auth: SSHAuth, expectedFingerprint: String? = nil) async throws {
+        try await connect(host: host, port: port, username: username, auth: auth, expectedFingerprint: expectedFingerprint, tailscaleFD: nil)
+    }
 }
 
 // MARK: - LibSSH2Channel
@@ -280,6 +289,9 @@ actor SSHService: SSHServiceProtocol {
     /// The POSIX socket file descriptor backing the connection.
     private var socketFd: Int32 = -1
 
+    /// When true, socketFd was provided by TailscaleService and must NOT be closed by us.
+    private var isTailscaleFD: Bool = false
+
     /// Background task that reads from the shell channel and delivers data
     /// via the `onData` callback.
     private var readTask: Task<Void, Never>?
@@ -306,7 +318,8 @@ actor SSHService: SSHServiceProtocol {
         port: UInt16,
         username: String,
         auth: SSHAuth,
-        expectedFingerprint: String? = nil
+        expectedFingerprint: String? = nil,
+        tailscaleFD: Int32? = nil
     ) async throws {
         // Always clean up any previous connection first.
         // The state check was removed because the readTask may have
@@ -326,61 +339,69 @@ actor SSHService: SSHServiceProtocol {
                 throw SSHError.connectionFailed("libssh2 initialization failed")
             }
 
-            // Resolve the host first so we know the address family.
-            var hints = addrinfo()
-            hints.ai_family = AF_UNSPEC  // Support both IPv4 and IPv6
-            hints.ai_socktype = SOCK_STREAM
-            var result: UnsafeMutablePointer<addrinfo>?
-            let portString = String(port)
-            let gaiRc = getaddrinfo(host, portString, &hints, &result)
-            guard gaiRc == 0, let addrInfo = result else {
-                let errorMsg = gaiRc != 0
-                    ? String(cString: gai_strerror(gaiRc))
-                    : "No address found"
-                throw SSHError.connectionFailed(
-                    "Host resolution failed: \(errorMsg)"
+            if let fd = tailscaleFD {
+                // Use the Tailscale-provided fd — skip DNS resolution, socket creation, and connect.
+                socketFd = fd
+                isTailscaleFD = true
+                sshLog.info("Using Tailscale fd=\(fd) for \(host):\(port)")
+            } else {
+                isTailscaleFD = false
+
+                // Resolve the host first so we know the address family.
+                var hints = addrinfo()
+                hints.ai_family = AF_UNSPEC  // Support both IPv4 and IPv6
+                hints.ai_socktype = SOCK_STREAM
+                var result: UnsafeMutablePointer<addrinfo>?
+                let portString = String(port)
+                let gaiRc = getaddrinfo(host, portString, &hints, &result)
+                guard gaiRc == 0, let addrInfo = result else {
+                    let errorMsg = gaiRc != 0
+                        ? String(cString: gai_strerror(gaiRc))
+                        : "No address found"
+                    throw SSHError.connectionFailed(
+                        "Host resolution failed: \(errorMsg)"
+                    )
+                }
+                defer { freeaddrinfo(result) }
+
+                // Create a TCP socket matching the resolved address family.
+                let fd = socket(addrInfo.pointee.ai_family, SOCK_STREAM, 0)
+                guard fd >= 0 else {
+                    throw SSHError.connectionFailed("Failed to create socket")
+                }
+                socketFd = fd
+
+                // Apply socket-level timeouts so read/write don't block
+                // indefinitely on stalled networks.
+                // Note: SO_SNDTIMEO/SO_RCVTIMEO do NOT bound the connect() syscall
+                // on Darwin — TCP SYN timeout is kernel-controlled (~75s). The
+                // libssh2 session timeout (below) covers handshake/auth phases.
+                let wholeSeconds = Int(connectionTimeout)
+                let microseconds = Int32((connectionTimeout - Double(wholeSeconds)) * 1_000_000)
+                var timeout = timeval(tv_sec: wholeSeconds, tv_usec: microseconds)
+                if setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) != 0 {
+                    // Non-fatal: proceed without send timeout
+                }
+                if setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) != 0 {
+                    // Non-fatal: proceed without receive timeout
+                }
+
+                // Connect the socket.
+                let connectRc = Darwin.connect(
+                    fd, addrInfo.pointee.ai_addr, addrInfo.pointee.ai_addrlen
                 )
-            }
-            defer { freeaddrinfo(result) }
-
-            // Create a TCP socket matching the resolved address family.
-            let fd = socket(addrInfo.pointee.ai_family, SOCK_STREAM, 0)
-            guard fd >= 0 else {
-                throw SSHError.connectionFailed("Failed to create socket")
-            }
-            socketFd = fd
-
-            // Apply socket-level timeouts so read/write don't block
-            // indefinitely on stalled networks.
-            // Note: SO_SNDTIMEO/SO_RCVTIMEO do NOT bound the connect() syscall
-            // on Darwin — TCP SYN timeout is kernel-controlled (~75s). The
-            // libssh2 session timeout (below) covers handshake/auth phases.
-            let wholeSeconds = Int(connectionTimeout)
-            let microseconds = Int32((connectionTimeout - Double(wholeSeconds)) * 1_000_000)
-            var timeout = timeval(tv_sec: wholeSeconds, tv_usec: microseconds)
-            if setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) != 0 {
-                // Non-fatal: proceed without send timeout
-            }
-            if setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size)) != 0 {
-                // Non-fatal: proceed without receive timeout
-            }
-
-            // Connect the socket.
-            let connectRc = Darwin.connect(
-                fd, addrInfo.pointee.ai_addr, addrInfo.pointee.ai_addrlen
-            )
-            guard connectRc == 0 else {
-                Darwin.close(fd)
-                socketFd = -1
-                throw SSHError.connectionFailed(
-                    "Socket connect failed (errno=\(errno))"
-                )
+                guard connectRc == 0 else {
+                    Darwin.close(fd)
+                    socketFd = -1
+                    throw SSHError.connectionFailed(
+                        "Socket connect failed (errno=\(errno))"
+                    )
+                }
             }
 
             // Create and configure the libssh2 session.
             guard let sess = libssh2_session_init_ex(nil, nil, nil, nil) else {
-                Darwin.close(fd)
-                socketFd = -1
+                cleanupSession()
                 throw SSHError.connectionFailed(
                     "libssh2_session_init failed"
                 )
@@ -397,7 +418,7 @@ actor SSHService: SSHServiceProtocol {
             // Blocking mode for the handshake and authentication.
             libssh2_session_set_blocking(sess, 1)
 
-            let hsRc = libssh2_session_handshake(sess, fd)
+            let hsRc = libssh2_session_handshake(sess, socketFd)
             guard hsRc == 0 else {
                 let msg = lastSessionError(sess)
                 cleanupSession()
@@ -828,8 +849,11 @@ actor SSHService: SSHServiceProtocol {
             session = nil
         }
         if socketFd >= 0 {
-            Darwin.close(socketFd)
+            if !isTailscaleFD {
+                Darwin.close(socketFd)
+            }
             socketFd = -1
+            isTailscaleFD = false
         }
     }
 }

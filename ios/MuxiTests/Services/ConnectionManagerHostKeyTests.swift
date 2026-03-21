@@ -25,7 +25,8 @@ final class HostKeyMockSSHService: SSHServiceProtocol {
         port: UInt16,
         username: String,
         auth: SSHAuth,
-        expectedFingerprint: String? = nil
+        expectedFingerprint: String? = nil,
+        tailscaleFD: Int32? = nil
     ) async throws {
         connectCallCount += 1
 

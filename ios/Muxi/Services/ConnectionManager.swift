@@ -44,6 +44,7 @@ final class ConnectionManager {
     private let keychainService = KeychainService()
     private let lastSessionStore: LastSessionStore
     private let tailscaleService = TailscaleService()
+    let tailscaleAccountManager: TailscaleAccountManager
 
     /// Current Tailscale node state, observable by UI.
     private(set) var tailscaleState: TailscaleState = .disconnected
@@ -369,12 +370,14 @@ final class ConnectionManager {
         sshService: SSHServiceProtocol? = nil,
         lastSessionStore: LastSessionStore = LastSessionStore(),
         maxReconnectAttempts: Int = 5,
-        baseDelay: TimeInterval = 1.0
+        baseDelay: TimeInterval = 1.0,
+        tailscaleAccountManager: TailscaleAccountManager? = nil
     ) {
         self.sshService = sshService ?? SSHService()
         self.lastSessionStore = lastSessionStore
         self.maxReconnectAttempts = maxReconnectAttempts
         self.baseDelay = baseDelay
+        self.tailscaleAccountManager = tailscaleAccountManager ?? TailscaleAccountManager()
     }
 
     // MARK: - Connect
@@ -408,11 +411,28 @@ final class ConnectionManager {
             var sshPort = server.port
 
             if server.isTailscale {
-                guard tailscaleState == .connected else {
-                    logger.error("Tailscale not connected — cannot connect to server \(server.host)")
-                    state = .disconnected
-                    currentServer = nil
-                    throw TailscaleError.notConnected
+                if tailscaleState != .connected {
+                    connectingStatus = "Tailscale reconnecting..."
+                    logger.info("Tailscale not connected, attempting auto-reconnect")
+                    if let account = tailscaleAccountManager.account {
+                        let authKey: String?
+                        if account.provider == .official {
+                            authKey = nil  // Use persisted node identity in stateDir
+                        } else {
+                            authKey = tailscaleAccountManager.preAuthKey() ?? ""
+                        }
+                        try await tailscaleService.start(
+                            controlURL: account.controlURL,
+                            authKey: authKey ?? "",
+                            hostname: account.hostname
+                        )
+                        tailscaleState = .connected
+                    } else {
+                        logger.error("Tailscale not connected and no account configured — cannot connect to server \(server.host)")
+                        state = .disconnected
+                        currentServer = nil
+                        throw TailscaleError.notConnected
+                    }
                 }
                 connectingStatus = "Tailscale dial..."
                 let localPort = try await tailscaleService.dial(host: server.host, port: server.port)

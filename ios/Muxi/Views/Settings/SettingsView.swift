@@ -63,7 +63,7 @@ struct SettingsView: View {
     private var tailscaleSection: some View {
         Section("Tailscale") {
             NavigationLink {
-                TailscaleSettingsView(connectionManager: connectionManager)
+                TailscaleSettingsView()
             } label: {
                 HStack {
                     Label("Tailscale", systemImage: "network")

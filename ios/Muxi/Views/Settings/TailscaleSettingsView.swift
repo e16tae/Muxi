@@ -1,62 +1,35 @@
 import SwiftUI
 
-/// Settings screen for configuring the embedded Tailscale node.
+/// Account management view for the Tailscale integration.
+/// Configuration (setup wizard) happens in ``ServerEditView``; this view
+/// only shows current account status and provides connect / sign-out actions.
 struct TailscaleSettingsView: View {
-    let connectionManager: ConnectionManager
-
-    @State private var controlURL: String = ""
-    @State private var preAuthKey: String = ""
-    @State private var hostname: String = ""
-
-    private let configStore = TailscaleConfigStore()
+    @Environment(TailscaleAccountManager.self) private var accountManager
+    @Environment(ConnectionManager.self) private var connectionManager
 
     var body: some View {
         List {
-            configSection
-            connectionSection
+            if accountManager.provider != nil {
+                accountSection
+                actionsSection
+            } else {
+                noAccountSection
+            }
         }
         .scrollContentBackground(.hidden)
         .background(MuxiTokens.Colors.surfaceBase)
         .navigationTitle("Tailscale")
-        .onAppear { loadConfig() }
     }
 
-    // MARK: - Config Section
+    // MARK: - Account Section
 
     @ViewBuilder
-    private var configSection: some View {
-        Section("Headscale") {
-            TextField("URL", text: $controlURL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-                .listRowBackground(MuxiTokens.Colors.surfaceDefault)
-                .foregroundStyle(MuxiTokens.Colors.textPrimary)
-                .onSubmit { saveConfig() }
+    private var accountSection: some View {
+        Section("Account") {
+            row(label: "Provider", value: providerText)
 
-            SecureField("Pre-auth Key", text: $preAuthKey)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .listRowBackground(MuxiTokens.Colors.surfaceDefault)
-                .foregroundStyle(MuxiTokens.Colors.textPrimary)
-                .onSubmit { saveConfig() }
-
-            TextField("Hostname", text: $hostname)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .listRowBackground(MuxiTokens.Colors.surfaceDefault)
-                .foregroundStyle(MuxiTokens.Colors.textPrimary)
-                .onSubmit { saveConfig() }
-        }
-    }
-
-    // MARK: - Connection Section
-
-    @ViewBuilder
-    private var connectionSection: some View {
-        Section("Connection") {
             HStack {
-                Label("Status", systemImage: statusIcon)
+                Text("Status")
                     .foregroundStyle(MuxiTokens.Colors.textPrimary)
                 Spacer()
                 Text(statusText)
@@ -64,12 +37,50 @@ struct TailscaleSettingsView: View {
             }
             .listRowBackground(MuxiTokens.Colors.surfaceDefault)
 
-            Button(action: toggleConnection) {
+            row(label: "This device", value: accountManager.hostname)
+
+            if accountManager.provider == .headscale {
+                row(label: "Control URL", value: accountManager.controlURL)
+            }
+        }
+    }
+
+    // MARK: - Actions Section
+
+    @ViewBuilder
+    private var actionsSection: some View {
+        Section {
+            Button {
+                toggleConnection()
+            } label: {
                 Text(isConnected ? "Disconnect" : "Connect")
                     .frame(maxWidth: .infinity)
             }
-            .disabled((controlURL.isEmpty || preAuthKey.isEmpty) && !isConnected)
             .listRowBackground(MuxiTokens.Colors.surfaceDefault)
+
+            Button(role: .destructive) {
+                Task {
+                    if isConnected {
+                        await connectionManager.stopTailscale()
+                    }
+                    accountManager.signOut()
+                }
+            } label: {
+                Text("Sign Out")
+                    .frame(maxWidth: .infinity)
+            }
+            .listRowBackground(MuxiTokens.Colors.surfaceDefault)
+        }
+    }
+
+    // MARK: - No Account Section
+
+    @ViewBuilder
+    private var noAccountSection: some View {
+        Section {
+            Text("서버 추가 시 Tailscale을 선택하면 설정할 수 있습니다.")
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                .listRowBackground(MuxiTokens.Colors.surfaceDefault)
         }
     }
 
@@ -79,21 +90,20 @@ struct TailscaleSettingsView: View {
         connectionManager.tailscaleState == .connected
     }
 
-    private var statusText: String {
-        switch connectionManager.tailscaleState {
-        case .disconnected: "Disconnected"
-        case .connecting: "Connecting…"
-        case .connected: "Connected"
-        case .error(let msg): msg
+    private var providerText: String {
+        switch accountManager.provider {
+        case .official: "Tailscale"
+        case .headscale: "Headscale"
+        case nil: "—"
         }
     }
 
-    private var statusIcon: String {
+    private var statusText: String {
         switch connectionManager.tailscaleState {
-        case .disconnected: "circle"
-        case .connecting: "circle.dotted"
-        case .connected: "checkmark.circle.fill"
-        case .error: "exclamationmark.circle"
+        case .disconnected: "Disconnected"
+        case .connecting: "Connecting..."
+        case .connected: "Connected"
+        case .error(let msg): msg
         }
     }
 
@@ -101,33 +111,34 @@ struct TailscaleSettingsView: View {
         switch connectionManager.tailscaleState {
         case .disconnected: MuxiTokens.Colors.textSecondary
         case .connecting: MuxiTokens.Colors.textSecondary
-        case .connected: .green
-        case .error: .red
+        case .connected: MuxiTokens.Colors.success
+        case .error: MuxiTokens.Colors.error
         }
     }
 
-    private func loadConfig() {
-        controlURL = configStore.controlURL
-        preAuthKey = configStore.preAuthKey
-        hostname = configStore.hostname
-    }
-
-    private func saveConfig() {
-        configStore.controlURL = controlURL
-        configStore.preAuthKey = preAuthKey
-        configStore.hostname = hostname
+    private func row(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(MuxiTokens.Colors.textPrimary)
+            Spacer()
+            Text(value)
+                .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .listRowBackground(MuxiTokens.Colors.surfaceDefault)
     }
 
     private func toggleConnection() {
-        saveConfig()
         Task {
             if isConnected {
                 await connectionManager.stopTailscale()
             } else {
+                guard let account = accountManager.account else { return }
                 await connectionManager.startTailscale(
-                    controlURL: controlURL,
-                    authKey: preAuthKey,
-                    hostname: hostname
+                    controlURL: account.controlURL,
+                    authKey: accountManager.preAuthKey() ?? "",
+                    hostname: account.hostname
                 )
             }
         }

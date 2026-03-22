@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 // MARK: - TailscaleDevice
 
@@ -39,7 +38,6 @@ enum TailscaleDeviceError: Error, LocalizedError {
 /// Parse methods are `static` so they can be unit-tested without network calls.
 /// The actor uses `URLSession` for actual network requests.
 actor TailscaleDeviceService {
-    private let logger = Logger(subsystem: "com.muxi.app", category: "TailscaleDeviceService")
     private let session: URLSession
 
     init(session: URLSession = .shared) {
@@ -144,6 +142,14 @@ private struct HeadscaleMachine: Decodable {
     let ipAddresses: [String]
     let online: Bool
     let lastSeen: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case givenName = "given_name"
+        case ipAddresses = "ip_addresses"
+        case online
+        case lastSeen = "last_seen"
+    }
 }
 
 /// Decodes a JSON value that may be either a string or an integer.
@@ -174,7 +180,33 @@ private enum StringOrInt: Decodable {
 private extension JSONDecoder {
     static let tailscaleDecoder: JSONDecoder = {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let string = try container.decode(String.self)
+            // Try fractional seconds first (e.g. "2025-03-22T10:00:00.123456Z")
+            if let date = ISO8601DateFormatter.fractional.date(from: string) {
+                return date
+            }
+            // Fall back to standard ISO 8601 (e.g. "2025-03-22T10:00:00Z")
+            if let date = ISO8601DateFormatter.standard.date(from: string) {
+                return date
+            }
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Invalid ISO 8601 date: \(string)")
+        }
         return decoder
+    }()
+}
+
+private extension ISO8601DateFormatter {
+    static let fractional: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+
+    static let standard: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
     }()
 }

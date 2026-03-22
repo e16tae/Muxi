@@ -39,17 +39,17 @@ struct TailscaleDeviceServiceTests {
         #expect(devices[0].ipv4Address == "100.64.0.1")
     }
 
-    @Test("Parse Headscale API response")
+    @Test("Parse Headscale API response with snake_case keys")
     func parseHeadscaleResponse() throws {
         let json = """
         {
             "machines": [
                 {
                     "id": "1",
-                    "givenName": "web-server",
-                    "ipAddresses": ["100.64.0.10", "fd7a:115c:a1e0::a"],
+                    "given_name": "web-server",
+                    "ip_addresses": ["100.64.0.10", "fd7a:115c:a1e0::a"],
                     "online": true,
-                    "lastSeen": "2026-03-22T10:00:00Z"
+                    "last_seen": "2026-03-22T10:00:00Z"
                 }
             ]
         }
@@ -59,6 +59,26 @@ struct TailscaleDeviceServiceTests {
         #expect(devices[0].id == "1")
         #expect(devices[0].name == "web-server")
         #expect(devices[0].ipv4Address == "100.64.0.10")
+    }
+
+    @Test("Parse Headscale response with integer id")
+    func parseHeadscaleIntegerId() throws {
+        let json = """
+        {
+            "machines": [
+                {
+                    "id": 42,
+                    "given_name": "db-server",
+                    "ip_addresses": ["100.64.0.20"],
+                    "online": true,
+                    "last_seen": "2026-03-22T10:00:00Z"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+        let devices = try TailscaleDeviceService.parseHeadscaleResponse(json)
+        #expect(devices.count == 1)
+        #expect(devices[0].id == "42")
     }
 
     @Test("IPv4 address selection prefers IPv4 over IPv6")
@@ -85,5 +105,38 @@ struct TailscaleDeviceServiceTests {
             lastSeen: nil
         )
         #expect(device.ipv4Address == "fd7a:115c:a1e0::1")
+    }
+
+    @Test("Empty addresses returns nil ipv4Address")
+    func emptyAddresses() {
+        let device = TailscaleDevice(
+            id: "1",
+            name: "test",
+            addresses: [],
+            isOnline: true,
+            os: nil,
+            lastSeen: nil
+        )
+        #expect(device.ipv4Address == nil)
+    }
+
+    @Test("Fractional-second ISO8601 dates are parsed correctly")
+    func fractionalSecondDates() throws {
+        let json = """
+        {
+            "devices": [
+                {
+                    "id": "node-frac",
+                    "hostname": "frac-server",
+                    "addresses": ["100.64.0.1"],
+                    "os": "linux",
+                    "online": true,
+                    "lastSeen": "2026-03-22T10:00:00.123456Z"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+        let devices = try TailscaleDeviceService.parseOfficialResponse(json)
+        #expect(devices[0].lastSeen != nil)
     }
 }

@@ -6,6 +6,17 @@ struct MuxiApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var connectionManager = ConnectionManager()
 
+    let modelContainer: ModelContainer = {
+        do {
+            return try ModelContainer(
+                for: Server.self,
+                migrationPlan: ServerMigrationPlan.self
+            )
+        } catch {
+            fatalError("Failed to create ModelContainer: \(error)")
+        }
+    }()
+
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -25,6 +36,6 @@ struct MuxiApp: App {
                     }
                 }
         }
-        .modelContainer(for: [Server.self])
+        .modelContainer(modelContainer)
     }
 }

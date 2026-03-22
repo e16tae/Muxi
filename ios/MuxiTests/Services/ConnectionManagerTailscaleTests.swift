@@ -28,7 +28,7 @@ final class ConnectionManagerTailscaleTests: XCTestCase {
         let cm = ConnectionManager(sshService: mockSSH)
 
         let server = Server(name: "ts-server", host: "100.64.0.1", username: "root", authMethod: .password)
-        server.useTailscale = true
+        server.tailscaleDeviceID = "node-test"
 
         do {
             try await cm.connect(server: server, password: "test")
@@ -46,7 +46,7 @@ final class ConnectionManagerTailscaleTests: XCTestCase {
         let cm = ConnectionManager(sshService: mockSSH)
 
         let server = Server(name: "direct-server", host: "192.168.1.1", username: "root", authMethod: .password)
-        server.useTailscale = false
+        // tailscaleDeviceID is nil by default — direct connection
 
         do {
             try await cm.connect(server: server, password: "test")

@@ -407,7 +407,7 @@ final class ConnectionManager {
             var sshHost = server.host
             var sshPort = server.port
 
-            if server.useTailscale {
+            if server.isTailscale {
                 guard tailscaleState == .connected else {
                     logger.error("Tailscale not connected — cannot connect to server \(server.host)")
                     state = .disconnected
@@ -435,7 +435,7 @@ final class ConnectionManager {
             // Skip exec-based tmux check for Tailscale connections —
             // exec channels have latency issues through the local TCP proxy.
             // The shell channel (used by tmux -CC attach) works reliably.
-            if !server.useTailscale {
+            if !server.isTailscale {
                 // Check tmux availability before querying sessions.
                 try await checkTmuxAvailability()
             }
@@ -443,7 +443,7 @@ final class ConnectionManager {
             let serverID = server.id.uuidString
             let targetSession: String
 
-            if server.useTailscale {
+            if server.isTailscale {
                 // Tailscale path: skip exec-based session listing (exec channels
                 // have issues through the local TCP proxy). Use shell command:
                 // "tmux -CC attach || tmux -CC new-session"
@@ -480,7 +480,7 @@ final class ConnectionManager {
                 }
             }
 
-            try await performAttach(sessionName: targetSession, attachOrCreate: server.useTailscale)
+            try await performAttach(sessionName: targetSession, attachOrCreate: server.isTailscale)
             lastSessionStore.save(sessionName: targetSession, forServerID: serverID)
 
         } catch let error as SSHHostKeyError {

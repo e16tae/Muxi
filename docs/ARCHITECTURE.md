@@ -10,11 +10,13 @@ Muxi uses a 4-layer architecture designed for cross-platform code sharing betwee
 │  ServerListView, TerminalSessionView, TerminalView,          │
 │  ToolbarView, PlusMenuView, SessionPillsView,                │
 │  WindowPanePillsView, ExtendedKeyboardView, PaneContainerView│
+│  TailscaleSetupSheet, TailscaleDeviceListView                 │
 ├──────────────────────────────────────────────────────────────┤
 │                    App Layer (Swift)                          │
 │  ConnectionManager, SSHService (libssh2 actor),              │
 │  TmuxControlService, TailscaleService, KeychainService,      │
-│  LastSessionStore, ThemeManager                               │
+│  TailscaleAccountManager, TailscaleDeviceService,             │
+│  TailscaleDeviceListViewModel, LastSessionStore, ThemeManager │
 ├──────────────────────────────────────────────────────────────┤
 │                Bridge Layer (Swift ↔ C)                       │
 │  MuxiCore SPM package — module maps + Swift wrappers         │
@@ -38,6 +40,7 @@ Platform-specific SwiftUI views. Responsible for layout, user interaction, and v
 - **Common**: Shared UI components (`ErrorBannerView`, `ReconnectingOverlay`)
 - **QuickAction**: One-tap tmux command buttons
 - **ExtendedKeyboard**: Ctrl/Alt/arrow keys overlay
+- **Tailscale**: `TailscaleSetupSheet` (inline setup wizard), `TailscaleDeviceListView` (device picker)
 
 ### App Layer — `ios/Muxi/ViewModels/` + `ios/Muxi/Services/`
 
@@ -50,7 +53,10 @@ Business logic, state management, and service coordination.
 | `TmuxControlService` | Parses tmux control mode output, dispatches structured events |
 | `KeychainService` | Secure credential storage via iOS Keychain |
 | `LastSessionStore` | Persists last-used session per server (UserDefaults) |
-| `TailscaleService` | Embedded Tailscale node via libtailscale — userspace networking for Headscale |
+| `TailscaleService` | Embedded Tailscale node via libtailscale — userspace networking |
+| `TailscaleAccountManager` | Multi-provider account management (Official OAuth + Headscale), Keychain-backed credentials |
+| `TailscaleDeviceService` | API-based device discovery for Official and Headscale control servers |
+| `TailscaleDeviceListViewModel` | Device list state management, search, filtering |
 | `ThemeManager` | Terminal color theme management |
 
 All ViewModels use `@MainActor @Observable` (iOS 17+). SSHService is a Swift `actor`.

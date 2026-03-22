@@ -8,18 +8,37 @@ struct MuxiApp: App {
     @State private var tailscaleAccountManager: TailscaleAccountManager
 
     let modelContainer: ModelContainer = {
+        // First try with migration plan (handles V1→V2 for versioned stores)
         do {
             return try ModelContainer(
                 for: Server.self,
                 migrationPlan: ServerMigrationPlan.self
             )
         } catch {
-            fatalError("Failed to create ModelContainer: \(error)")
+            // Existing store created without VersionedSchema — try lightweight migration
+            // (SwiftData can auto-add nullable columns and ignore removed ones)
+            do {
+                return try ModelContainer(for: Server.self)
+            } catch {
+                // Store is truly corrupt — delete and recreate as last resort
+                let storeURL = URL.applicationSupportDirectory.appending(path: "default.store")
+                for suffix in ["", "-wal", "-shm"] {
+                    try? FileManager.default.removeItem(
+                        at: storeURL.deletingLastPathComponent().appending(path: "default.store\(suffix)")
+                    )
+                }
+                do {
+                    return try ModelContainer(for: Server.self)
+                } catch {
+                    fatalError("Failed to create ModelContainer after store reset: \(error)")
+                }
+            }
         }
     }()
 
     init() {
         let accountManager = TailscaleAccountManager()
+        accountManager.migrateIfNeeded()
         _connectionManager = State(initialValue: ConnectionManager(tailscaleAccountManager: accountManager))
         _tailscaleAccountManager = State(initialValue: accountManager)
     }

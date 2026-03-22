@@ -427,6 +427,11 @@ final class ConnectionManager {
                             hostname: account.hostname
                         )
                         tailscaleState = .connected
+                        // Wait for WireGuard peer handshake after tsnet start.
+                        // start() returns when node is registered, but peer tunnels
+                        // aren't established until ~3-5s later.
+                        connectingStatus = "Tailscale peer handshake..."
+                        try await Task.sleep(for: .seconds(3))
                     } else {
                         logger.error("Tailscale not connected and no account configured — cannot connect to server \(server.host)")
                         state = .disconnected

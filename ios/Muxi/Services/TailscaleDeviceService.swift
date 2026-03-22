@@ -87,21 +87,50 @@ actor TailscaleDeviceService {
 
     // MARK: - Headscale
 
-    /// GET {controlURL}/api/v1/machine
+    /// Headscale API: try /api/v1/node (v0.23+), fallback to /api/v1/machine (v0.22-)
     private func fetchHeadscaleDevices(controlURL: String, apiKey: String) async throws -> [TailscaleDevice] {
-        guard let url = URL(string: "\(controlURL)/api/v1/machine") else {
-            throw TailscaleDeviceError.invalidURL
-        }
-        var request = URLRequest(url: url)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        // Try v0.23+ endpoint first, fallback to legacy
+        for path in ["/api/v1/node", "/api/v1/machine"] {
+            guard let url = URL(string: "\(controlURL)\(path)") else {
+                throw TailscaleDeviceError.invalidURL
+            }
+            var request = URLRequest(url: url)
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw TailscaleDeviceError.apiFailed((response as? HTTPURLResponse)?.statusCode ?? 0)
+            let (data, response) = try await session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+
+            if status == 404 { continue } // Try next endpoint
+            guard status == 200 else {
+                throw TailscaleDeviceError.apiFailed(status)
+            }
+
+            // Both endpoints return {"nodes": [...]} or {"machines": [...]}
+            // Try nodes first, then machines
+            if let devices = try? Self.parseHeadscaleNodeResponse(data) {
+                return devices
+            }
+            return try Self.parseHeadscaleResponse(data)
         }
-        return try Self.parseHeadscaleResponse(data)
+        throw TailscaleDeviceError.apiFailed(404)
     }
 
+    /// Parse Headscale v0.23+ response with "nodes" key
+    static func parseHeadscaleNodeResponse(_ data: Data) throws -> [TailscaleDevice] {
+        let decoded = try JSONDecoder.tailscaleDecoder.decode(HeadscaleNodesResponse.self, from: data)
+        return decoded.nodes.map {
+            TailscaleDevice(
+                id: $0.id.stringValue,
+                name: $0.givenName,
+                addresses: $0.ipAddresses,
+                isOnline: $0.online,
+                os: nil,
+                lastSeen: $0.lastSeen
+            )
+        }
+    }
+
+    /// Parse Headscale v0.22- response with "machines" key
     static func parseHeadscaleResponse(_ data: Data) throws -> [TailscaleDevice] {
         let decoded = try JSONDecoder.tailscaleDecoder.decode(HeadscaleDevicesResponse.self, from: data)
         return decoded.machines.map {
@@ -136,6 +165,13 @@ private struct HeadscaleDevicesResponse: Decodable {
     let machines: [HeadscaleMachine]
 }
 
+/// Headscale v0.23+ uses "nodes" key instead of "machines"
+private struct HeadscaleNodesResponse: Decodable {
+    let nodes: [HeadscaleMachine]
+}
+
+/// Headscale versions vary between camelCase and snake_case JSON keys.
+/// This struct handles both via custom Decodable init.
 private struct HeadscaleMachine: Decodable {
     let id: StringOrInt
     let givenName: String
@@ -143,12 +179,35 @@ private struct HeadscaleMachine: Decodable {
     let online: Bool
     let lastSeen: Date?
 
-    enum CodingKeys: String, CodingKey {
-        case id
+    enum CamelKeys: String, CodingKey {
+        case id, givenName, ipAddresses, online, lastSeen
+    }
+
+    enum SnakeKeys: String, CodingKey {
+        case id, online
         case givenName = "given_name"
         case ipAddresses = "ip_addresses"
-        case online
         case lastSeen = "last_seen"
+    }
+
+    init(from decoder: Decoder) throws {
+        // Try camelCase first (common in newer Headscale versions)
+        if let c = try? decoder.container(keyedBy: CamelKeys.self),
+           c.contains(.givenName) {
+            id = try c.decode(StringOrInt.self, forKey: .id)
+            givenName = try c.decode(String.self, forKey: .givenName)
+            ipAddresses = try c.decode([String].self, forKey: .ipAddresses)
+            online = try c.decode(Bool.self, forKey: .online)
+            lastSeen = try c.decodeIfPresent(Date.self, forKey: .lastSeen)
+        } else {
+            // Fallback to snake_case
+            let c = try decoder.container(keyedBy: SnakeKeys.self)
+            id = try c.decode(StringOrInt.self, forKey: .id)
+            givenName = try c.decode(String.self, forKey: .givenName)
+            ipAddresses = try c.decode([String].self, forKey: .ipAddresses)
+            online = try c.decode(Bool.self, forKey: .online)
+            lastSeen = try c.decodeIfPresent(Date.self, forKey: .lastSeen)
+        }
     }
 }
 

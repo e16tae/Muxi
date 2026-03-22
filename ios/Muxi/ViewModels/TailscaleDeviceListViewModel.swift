@@ -29,7 +29,7 @@ final class TailscaleDeviceListViewModel {
             logger.info("Fetched \(self.devices.count) devices")
         } catch {
             errorMessage = error.localizedDescription
-            logger.error("Device fetch failed: \(error)")
+            logger.error("Device fetch failed: \(error.localizedDescription) — full: \(String(describing: error))")
         }
         isLoading = false
     }

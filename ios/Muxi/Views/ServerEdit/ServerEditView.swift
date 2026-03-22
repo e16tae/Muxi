@@ -109,24 +109,37 @@ struct ServerEditView: View {
 
         if connectionMethod == .tailscale {
             if tailscaleAccountManager.isConfigured {
-                Section("Tailscale Device") {
-                    TailscaleDeviceListView(accountManager: tailscaleAccountManager) { device in
-                        selectedDevice = device
-                        host = device.ipv4Address ?? ""
-                        name = name.isEmpty ? device.name : name
-                    }
-                }
-
-                if let device = selectedDevice {
-                    Section("Selected") {
-                        HStack {
-                            Text(device.name)
-                                .foregroundStyle(MuxiTokens.Colors.textPrimary)
-                            Spacer()
-                            Text(device.ipv4Address ?? "")
-                                .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                if tailscaleAccountManager.apiKey() != nil {
+                    // API key 있음 → 기기 목록 표시
+                    Section("Tailscale Device") {
+                        TailscaleDeviceListView(accountManager: tailscaleAccountManager) { device in
+                            selectedDevice = device
+                            host = device.ipv4Address ?? ""
+                            name = name.isEmpty ? device.name : name
                         }
-                        .listRowBackground(MuxiTokens.Colors.surfaceDefault)
+                    }
+
+                    if let device = selectedDevice {
+                        Section("Selected") {
+                            HStack {
+                                Text(device.name)
+                                    .foregroundStyle(MuxiTokens.Colors.textPrimary)
+                                Spacer()
+                                Text(device.ipv4Address ?? "")
+                                    .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                            }
+                            .listRowBackground(MuxiTokens.Colors.surfaceDefault)
+                        }
+                    }
+                } else {
+                    // API key 없음 → 수동 IP 입력
+                    Section {
+                        Text("API Key가 없어 기기 목록을 조회할 수 없습니다. Tailscale IP를 직접 입력하세요.")
+                            .font(.caption)
+                            .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                            .listRowBackground(MuxiTokens.Colors.surfaceDefault)
+                    } header: {
+                        Text("Tailscale")
                     }
                 }
             } else {
@@ -202,9 +215,15 @@ struct ServerEditView: View {
         }
 
         // Set Tailscale fields based on connection method
-        if connectionMethod == .tailscale, let device = selectedDevice {
-            targetServer.tailscaleDeviceID = device.id
-            targetServer.tailscaleDeviceName = device.name
+        if connectionMethod == .tailscale {
+            if let device = selectedDevice {
+                targetServer.tailscaleDeviceID = device.id
+                targetServer.tailscaleDeviceName = device.name
+            } else {
+                // API key 없이 수동 IP 입력 — host를 ID로 사용
+                targetServer.tailscaleDeviceID = "manual-\(host)"
+                targetServer.tailscaleDeviceName = host
+            }
         } else {
             targetServer.tailscaleDeviceID = nil
             targetServer.tailscaleDeviceName = nil

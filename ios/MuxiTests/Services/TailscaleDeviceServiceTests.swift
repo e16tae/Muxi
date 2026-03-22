@@ -120,6 +120,26 @@ struct TailscaleDeviceServiceTests {
         #expect(device.ipv4Address == nil)
     }
 
+    @Test("Parse Headscale v0.23+ node response")
+    func parseNodeResponse() throws {
+        let json = """
+        {
+            "nodes": [
+                {
+                    "id": "3",
+                    "givenName": "k8s-node",
+                    "ipAddresses": ["100.64.0.3"],
+                    "online": true,
+                    "lastSeen": "2026-03-22T10:00:00Z"
+                }
+            ]
+        }
+        """.data(using: .utf8)!
+        let devices = try TailscaleDeviceService.parseHeadscaleNodeResponse(json)
+        #expect(devices.count == 1)
+        #expect(devices[0].name == "k8s-node")
+    }
+
     @Test("Fractional-second ISO8601 dates are parsed correctly")
     func fractionalSecondDates() throws {
         let json = """

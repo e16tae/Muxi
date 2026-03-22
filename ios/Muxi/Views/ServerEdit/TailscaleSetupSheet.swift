@@ -83,12 +83,19 @@ struct TailscaleSetupSheet: View {
                     .autocorrectionDisabled()
                     .foregroundStyle(MuxiTokens.Colors.textPrimary)
                     .listRowBackground(MuxiTokens.Colors.surfaceDefault)
+            }
 
-                SecureField("API Key", text: $apiKey)
+            Section {
+                SecureField("API Key (선택)", text: $apiKey)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .foregroundStyle(MuxiTokens.Colors.textPrimary)
                     .listRowBackground(MuxiTokens.Colors.surfaceDefault)
+            } header: {
+                Text("기기 목록 (선택)")
+            } footer: {
+                Text("API Key를 입력하면 tailnet 기기 목록을 조회할 수 있습니다. 없으면 IP를 직접 입력합니다.")
+                    .foregroundStyle(MuxiTokens.Colors.textSecondary)
             }
 
             Section("Device") {
@@ -114,7 +121,7 @@ struct TailscaleSetupSheet: View {
                     Text("Connect")
                         .frame(maxWidth: .infinity)
                 }
-                .disabled(controlURL.isEmpty || preAuthKey.isEmpty || apiKey.isEmpty || isConnecting)
+                .disabled(controlURL.isEmpty || preAuthKey.isEmpty || isConnecting)
                 .listRowBackground(MuxiTokens.Colors.surfaceDefault)
             }
         }

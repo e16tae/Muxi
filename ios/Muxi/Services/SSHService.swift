@@ -496,6 +496,10 @@ actor SSHService: SSHServiceProtocol {
         guard state == .connected, let sess = session else {
             throw SSHError.notConnected
         }
+        // Ensure we're in blocking mode with a reasonable timeout for channel ops.
+        libssh2_session_set_blocking(sess, 1)
+        libssh2_session_set_timeout(sess, 10_000) // 10s timeout for exec
+
         // Open a channel for command execution (blocking mode).
         guard let channel = libssh2_channel_open_ex(
             sess, "session", 7,

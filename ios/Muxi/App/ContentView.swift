@@ -200,6 +200,11 @@ struct ContentView: View {
                 Text("Connecting...")
                     .font(MuxiTokens.Typography.title)
                     .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                if !connectionManager.connectingStatus.isEmpty {
+                    Text(connectionManager.connectingStatus)
+                        .font(MuxiTokens.Typography.caption)
+                        .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                }
 
                 Button("Cancel") {
                     connectionManager.disconnect()

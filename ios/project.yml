@@ -38,8 +38,8 @@ targets:
         embed: false
       - framework: ../vendor/openssl.xcframework
         embed: false
-      - framework: ../vendor/libtailscale.xcframework
-        embed: true
+      - framework: ../vendor/libmuxits.xcframework
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.muxi.app
@@ -51,6 +51,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: J8Z62WAPV6
         CODE_SIGN_ENTITLEMENTS: Muxi/Muxi.entitlements
+        SWIFT_OBJC_BRIDGING_HEADER: Muxi/Muxi-Bridging-Header.h
     info:
       path: Muxi/Info.plist
       properties:

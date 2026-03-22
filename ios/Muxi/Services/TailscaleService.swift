@@ -31,7 +31,7 @@ enum TailscaleState: Equatable, Sendable {
 
 // MARK: - TailscaleService
 
-/// Manages an embedded Tailscale node via the libtailscale C API.
+/// Manages an embedded Tailscale node via the muxits C API (tsnet wrapper).
 ///
 /// Uses tsnet userspace networking — does NOT consume the system VPN slot.
 /// The `dial()` method returns a file descriptor that can be passed directly
@@ -43,9 +43,6 @@ actor TailscaleService {
     private let logger = Logger(subsystem: "com.muxi.app", category: "TailscaleService")
 
     private(set) var state: TailscaleState = .disconnected
-
-    /// Opaque handle to the libtailscale server instance.
-    private var tsHandle: Int32 = -1
 
     /// File descriptors created by dial(), tracked for cleanup.
     private var activeFDs: Set<Int32> = []
@@ -62,6 +59,23 @@ actor TailscaleService {
         return dir
     }
 
+    // MARK: - Error buffer helper
+
+    private static let errBufSize = 1024
+
+    private func callWithError(_ body: (UnsafeMutablePointer<CChar>, Int32) -> Int32) throws -> Int32 {
+        let buf = UnsafeMutablePointer<CChar>.allocate(capacity: Self.errBufSize)
+        defer { buf.deallocate() }
+        buf[0] = 0
+
+        let rc = body(buf, Int32(Self.errBufSize))
+        if rc < 0 {
+            let msg = String(cString: buf)
+            throw TailscaleError.startFailed(msg.isEmpty ? "unknown error" : msg)
+        }
+        return rc
+    }
+
     // MARK: - Lifecycle
 
     /// Start the Tailscale node and connect to the Headscale control server.
@@ -74,17 +88,52 @@ actor TailscaleService {
         state = .connecting
         logger.info("Starting Tailscale node, control=\(controlURL) hostname=\(hostname)")
 
-        // TODO: Replace with actual libtailscale C API calls when framework is built:
-        //   tsHandle = tailscale_new()
-        //   tailscale_set_dir(tsHandle, stateDir.path)
-        //   tailscale_set_hostname(tsHandle, hostname)
-        //   tailscale_set_authkey(tsHandle, authKey)
-        //   tailscale_set_control_url(tsHandle, controlURL)
-        //   let rc = tailscale_up(tsHandle)
-        //   if rc != 0 { throw TailscaleError.startFailed(errMsg) }
+        let dir = stateDir.path
+        let urlCopy = controlURL
+        let keyCopy = authKey
+        let hostCopy = hostname
 
-        state = .error("libtailscale framework not yet linked")
-        throw TailscaleError.startFailed("libtailscale framework not yet linked")
+        // Run blocking C call off the actor's executor
+        let startResult: Result<Void, Error> = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let buf = UnsafeMutablePointer<CChar>.allocate(capacity: Self.errBufSize)
+                defer { buf.deallocate() }
+                buf[0] = 0
+
+                let rc = urlCopy.withCString { urlPtr in
+                    keyCopy.withCString { keyPtr in
+                        hostCopy.withCString { hostPtr in
+                            dir.withCString { dirPtr in
+                                muxits_start(
+                                    UnsafeMutablePointer(mutating: urlPtr),
+                                    UnsafeMutablePointer(mutating: keyPtr),
+                                    UnsafeMutablePointer(mutating: hostPtr),
+                                    UnsafeMutablePointer(mutating: dirPtr),
+                                    buf,
+                                    Int32(Self.errBufSize)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if rc < 0 {
+                    let msg = String(cString: buf)
+                    continuation.resume(returning: .failure(TailscaleError.startFailed(msg.isEmpty ? "unknown error" : msg)))
+                } else {
+                    continuation.resume(returning: .success(()))
+                }
+            }
+        }
+
+        do {
+            try startResult.get()
+            state = .connected
+            logger.info("Tailscale connected")
+        } catch {
+            state = .error(error.localizedDescription)
+            throw error
+        }
     }
 
     /// Stop the Tailscale node and clean up resources.
@@ -92,43 +141,58 @@ actor TailscaleService {
         logger.info("Stopping Tailscale node")
 
         for fd in activeFDs {
-            Darwin.close(fd)
+            muxits_close_conn(fd)
         }
         activeFDs.removeAll()
 
-        // TODO: Replace with actual libtailscale C API calls:
-        //   if tsHandle >= 0 {
-        //       tailscale_close(tsHandle)
-        //       tsHandle = -1
-        //   }
-
-        tsHandle = -1
+        muxits_stop()
         state = .disconnected
     }
 
     // MARK: - Dial
 
-    /// Connect to a Tailscale peer and return a file descriptor.
-    func dial(host: String, port: UInt16) async throws -> Int32 {
+    /// Connect to a Tailscale peer via a local TCP proxy.
+    ///
+    /// Returns a local TCP port on 127.0.0.1. The caller should connect to
+    /// `127.0.0.1:localPort` using a normal TCP socket — the proxy forwards
+    /// all traffic through the Tailscale tunnel.
+    func dial(host: String, port: UInt16) async throws -> UInt16 {
         guard state == .connected else {
             throw TailscaleError.notConnected
         }
 
-        logger.info("Dialing \(host):\(port) via Tailscale")
+        logger.info("Dialing \(host):\(port) via Tailscale (local proxy)")
 
-        // TODO: Replace with actual libtailscale C API call:
-        //   var conn: Int32 = -1
-        //   let rc = tailscale_dial(tsHandle, "tcp", "\(host):\(port)", &conn)
-        //   if rc != 0 { throw TailscaleError.dialFailed(errMsg) }
-        //   activeFDs.insert(conn)
-        //   return conn
+        // Run blocking C call off the actor's executor
+        let hostCopy = host
+        let portCopy = Int32(port)
+        let result: Result<UInt16, TailscaleError> = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let buf = UnsafeMutablePointer<CChar>.allocate(capacity: Self.errBufSize)
+                defer { buf.deallocate() }
+                buf[0] = 0
 
-        throw TailscaleError.dialFailed("libtailscale framework not yet linked")
-    }
+                let localPort = hostCopy.withCString { hostPtr in
+                    muxits_dial(
+                        UnsafeMutablePointer(mutating: hostPtr),
+                        portCopy,
+                        buf,
+                        Int32(Self.errBufSize)
+                    )
+                }
 
-    /// Release a specific fd from tracking (called when SSH disconnects cleanly).
-    func releaseFD(_ fd: Int32) {
-        activeFDs.remove(fd)
+                if localPort < 0 {
+                    let msg = String(cString: buf)
+                    continuation.resume(returning: .failure(.dialFailed(msg.isEmpty ? "unknown error" : msg)))
+                } else {
+                    continuation.resume(returning: .success(UInt16(localPort)))
+                }
+            }
+        }
+
+        let localPort = try result.get()
+        logger.info("Tailscale local proxy on port \(localPort)")
+        return localPort
     }
 
     // MARK: - Helpers

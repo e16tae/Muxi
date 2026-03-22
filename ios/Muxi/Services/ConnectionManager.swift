@@ -44,6 +44,7 @@ final class ConnectionManager {
     private let keychainService = KeychainService()
     private let lastSessionStore: LastSessionStore
     private let tailscaleService = TailscaleService()
+    let tailscaleAccountManager: TailscaleAccountManager
 
     /// Current Tailscale node state, observable by UI.
     private(set) var tailscaleState: TailscaleState = .disconnected
@@ -369,12 +370,14 @@ final class ConnectionManager {
         sshService: SSHServiceProtocol? = nil,
         lastSessionStore: LastSessionStore = LastSessionStore(),
         maxReconnectAttempts: Int = 5,
-        baseDelay: TimeInterval = 1.0
+        baseDelay: TimeInterval = 1.0,
+        tailscaleAccountManager: TailscaleAccountManager? = nil
     ) {
         self.sshService = sshService ?? SSHService()
         self.lastSessionStore = lastSessionStore
         self.maxReconnectAttempts = maxReconnectAttempts
         self.baseDelay = baseDelay
+        self.tailscaleAccountManager = tailscaleAccountManager ?? TailscaleAccountManager()
     }
 
     // MARK: - Connect
@@ -407,12 +410,34 @@ final class ConnectionManager {
             var sshHost = server.host
             var sshPort = server.port
 
-            if server.useTailscale {
-                guard tailscaleState == .connected else {
-                    logger.error("Tailscale not connected — cannot connect to server \(server.host)")
-                    state = .disconnected
-                    currentServer = nil
-                    throw TailscaleError.notConnected
+            if server.isTailscale {
+                if tailscaleState != .connected {
+                    connectingStatus = "Tailscale reconnecting..."
+                    logger.info("Tailscale not connected, attempting auto-reconnect")
+                    if let account = tailscaleAccountManager.account {
+                        let authKey: String?
+                        if account.provider == .official {
+                            authKey = nil  // Use persisted node identity in stateDir
+                        } else {
+                            authKey = tailscaleAccountManager.preAuthKey() ?? ""
+                        }
+                        try await tailscaleService.start(
+                            controlURL: account.controlURL,
+                            authKey: authKey ?? "",
+                            hostname: account.hostname
+                        )
+                        tailscaleState = .connected
+                        // Wait for WireGuard peer handshake after tsnet start.
+                        // start() returns when node is registered, but peer tunnels
+                        // aren't established until ~3-5s later.
+                        connectingStatus = "Tailscale peer handshake..."
+                        try await Task.sleep(for: .seconds(3))
+                    } else {
+                        logger.error("Tailscale not connected and no account configured — cannot connect to server \(server.host)")
+                        state = .disconnected
+                        currentServer = nil
+                        throw TailscaleError.notConnected
+                    }
                 }
                 connectingStatus = "Tailscale dial..."
                 let localPort = try await tailscaleService.dial(host: server.host, port: server.port)
@@ -435,7 +460,7 @@ final class ConnectionManager {
             // Skip exec-based tmux check for Tailscale connections —
             // exec channels have latency issues through the local TCP proxy.
             // The shell channel (used by tmux -CC attach) works reliably.
-            if !server.useTailscale {
+            if !server.isTailscale {
                 // Check tmux availability before querying sessions.
                 try await checkTmuxAvailability()
             }
@@ -443,7 +468,7 @@ final class ConnectionManager {
             let serverID = server.id.uuidString
             let targetSession: String
 
-            if server.useTailscale {
+            if server.isTailscale {
                 // Tailscale path: skip exec-based session listing (exec channels
                 // have issues through the local TCP proxy). Use shell command:
                 // "tmux -CC attach || tmux -CC new-session"
@@ -480,7 +505,7 @@ final class ConnectionManager {
                 }
             }
 
-            try await performAttach(sessionName: targetSession, attachOrCreate: server.useTailscale)
+            try await performAttach(sessionName: targetSession, attachOrCreate: server.isTailscale)
             lastSessionStore.save(sessionName: targetSession, forServerID: serverID)
 
         } catch let error as SSHHostKeyError {

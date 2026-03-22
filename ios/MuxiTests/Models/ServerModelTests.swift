@@ -46,10 +46,11 @@ struct ServerModelTests {
         #expect(server.agentForwarding == true)
     }
 
-    @Test("useTailscale defaults to false")
-    func useTailscaleDefault() {
+    @Test("isTailscale defaults to false with nil tailscaleDeviceID")
+    func isTailscaleDefault() {
         let server = Server(name: "test", host: "10.0.0.1", username: "root", authMethod: .password)
-        #expect(server.useTailscale == false)
+        #expect(server.isTailscale == false)
+        #expect(server.tailscaleDeviceID == nil)
     }
 
     // MARK: - SwiftData Persistence

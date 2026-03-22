@@ -55,8 +55,15 @@ final class Server {
     /// Stored in SwiftData (not a secret — safe for model storage).
     var hostKeyFingerprint: String?
 
-    /// Whether SSH connections to this server should route through Tailscale.
-    var useTailscale: Bool = false
+    /// The Tailscale node ID of the device to connect through.
+    /// `nil` means this is a direct SSH connection (no Tailscale).
+    var tailscaleDeviceID: String?
+
+    /// Human-readable Tailscale device name (e.g., "my-server").
+    var tailscaleDeviceName: String?
+
+    /// Whether this server connects through Tailscale.
+    var isTailscale: Bool { tailscaleDeviceID != nil }
 
     init(
         id: UUID = UUID(),

@@ -309,4 +309,5 @@ struct ContentView: View {
 #Preview {
     ContentView()
         .environment(ConnectionManager())
+        .environment(TailscaleAccountManager())
 }

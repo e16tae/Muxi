@@ -13,7 +13,7 @@ Muxi uses a 4-layer architecture designed for cross-platform code sharing betwee
 ├──────────────────────────────────────────────────────────────┤
 │                    App Layer (Swift)                          │
 │  ConnectionManager, SSHService (libssh2 actor),              │
-│  TmuxControlService, KeychainService,                        │
+│  TmuxControlService, TailscaleService, KeychainService,      │
 │  LastSessionStore, ThemeManager                               │
 ├──────────────────────────────────────────────────────────────┤
 │                Bridge Layer (Swift ↔ C)                       │
@@ -50,6 +50,7 @@ Business logic, state management, and service coordination.
 | `TmuxControlService` | Parses tmux control mode output, dispatches structured events |
 | `KeychainService` | Secure credential storage via iOS Keychain |
 | `LastSessionStore` | Persists last-used session per server (UserDefaults) |
+| `TailscaleService` | Embedded Tailscale node via libtailscale — userspace networking for Headscale |
 | `ThemeManager` | Terminal color theme management |
 
 All ViewModels use `@MainActor @Observable` (iOS 17+). SSHService is a Swift `actor`.

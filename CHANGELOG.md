@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Tailscale integration**: Embedded tsnet node for SSH over Headscale/Tailscale networks
+- **TailscaleSettingsView**: Headscale configuration (control URL, pre-auth key, hostname)
+- **Per-server Tailscale toggle**: "Tailscale" switch in server settings to route SSH via Tailscale
 - **Design system expansion**: Motion tokens (directional, weight, stagger), accessibility tokens, ShapeStyle dot-syntax, EdgeInsets constants, `monoCaption` typography token
 - **Design system tests**: ShapeStyle parity, accessibility compliance, motion token coverage
 

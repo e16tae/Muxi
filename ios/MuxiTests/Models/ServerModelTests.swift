@@ -46,6 +46,12 @@ struct ServerModelTests {
         #expect(server.agentForwarding == true)
     }
 
+    @Test("useTailscale defaults to false")
+    func useTailscaleDefault() {
+        let server = Server(name: "test", host: "10.0.0.1", username: "root", authMethod: .password)
+        #expect(server.useTailscale == false)
+    }
+
     // MARK: - SwiftData Persistence
 
     @Test("Server persists and fetches from in-memory SwiftData container")

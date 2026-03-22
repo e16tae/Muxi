@@ -113,7 +113,7 @@ class MockSSHService: SSHServiceProtocol {
     /// If set, `connect` throws this error instead of connecting.
     var mockConnectError: Error?
 
-    func connect(host: String, port: UInt16, username: String, auth: SSHAuth, expectedFingerprint: String? = nil) async throws {
+    func connect(host: String, port: UInt16, username: String, auth: SSHAuth, expectedFingerprint: String? = nil, tailscaleFD: Int32? = nil) async throws {
         if let error = mockConnectError { throw error }
         state = .connected
     }

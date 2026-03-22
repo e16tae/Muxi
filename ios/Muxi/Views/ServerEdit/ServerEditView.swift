@@ -15,6 +15,7 @@ struct ServerEditView: View {
     @State private var useKeyAuth = false
     @State private var agentForwarding = false
     @State private var password = ""
+    @State private var useTailscale = false
 
     private var isEditing: Bool { server != nil }
     private let keychainService = KeychainService()
@@ -53,6 +54,20 @@ struct ServerEditView: View {
 
                     Toggle("Agent Forwarding", isOn: $agentForwarding)
                 }
+
+                Section("Network") {
+                    Toggle(isOn: $useTailscale) {
+                        Label("Tailscale", systemImage: "network")
+                            .foregroundStyle(MuxiTokens.Colors.textPrimary)
+                    }
+                    .disabled(!TailscaleConfigStore().isConfigured)
+
+                    if !TailscaleConfigStore().isConfigured && useTailscale == false {
+                        Text("설정에서 Tailscale을 먼저 구성하세요")
+                            .font(.caption)
+                            .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                    }
+                }
             }
             .navigationTitle(isEditing ? "Edit Server" : "New Server")
             .navigationBarTitleDisplayMode(.inline)
@@ -83,6 +98,7 @@ struct ServerEditView: View {
         port = server.port
         username = server.username
         agentForwarding = server.agentForwarding
+        useTailscale = server.useTailscale
         if case .key = server.authMethod {
             useKeyAuth = true
         }
@@ -112,6 +128,7 @@ struct ServerEditView: View {
             server.username = username
             server.authMethod = authMethod
             server.agentForwarding = agentForwarding
+            server.useTailscale = useTailscale
             targetServer = server
         } else {
             let newServer = Server(
@@ -120,6 +137,7 @@ struct ServerEditView: View {
                 agentForwarding: agentForwarding
             )
             modelContext.insert(newServer)
+            newServer.useTailscale = useTailscale
             targetServer = newServer
         }
 

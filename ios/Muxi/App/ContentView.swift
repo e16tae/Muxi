@@ -176,7 +176,7 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     NavigationLink {
-                        SettingsView(themeManager: themeManager)
+                        SettingsView(themeManager: themeManager, connectionManager: connectionManager)
                     } label: {
                         Image(systemName: "gearshape")
                     }
@@ -200,6 +200,11 @@ struct ContentView: View {
                 Text("Connecting...")
                     .font(MuxiTokens.Typography.title)
                     .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                if !connectionManager.connectingStatus.isEmpty {
+                    Text(connectionManager.connectingStatus)
+                        .font(MuxiTokens.Typography.caption)
+                        .foregroundStyle(MuxiTokens.Colors.textSecondary)
+                }
 
                 Button("Cancel") {
                     connectionManager.disconnect()

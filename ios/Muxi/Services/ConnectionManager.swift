@@ -43,9 +43,16 @@ final class ConnectionManager {
     private let tmuxService = TmuxControlService()
     private let keychainService = KeychainService()
     private let lastSessionStore: LastSessionStore
+    private let tailscaleService = TailscaleService()
+
+    /// Current Tailscale node state, observable by UI.
+    private(set) var tailscaleState: TailscaleState = .disconnected
 
     /// The current connection state.
     private(set) var state: ConnectionState = .disconnected
+
+    /// Debug: shows which step of the connection process is active.
+    private(set) var connectingStatus: String = ""
 
     #if DEBUG
     /// Test-only: override the connection state for unit tests.
@@ -396,54 +403,84 @@ final class ConnectionManager {
             cachedAuth = auth
             logger.info("Auth resolved, starting SSH connect...")
 
+            // Determine SSH target: direct or via Tailscale local proxy
+            var sshHost = server.host
+            var sshPort = server.port
+
+            if server.useTailscale {
+                guard tailscaleState == .connected else {
+                    logger.error("Tailscale not connected — cannot connect to server \(server.host)")
+                    state = .disconnected
+                    currentServer = nil
+                    throw TailscaleError.notConnected
+                }
+                connectingStatus = "Tailscale dial..."
+                let localPort = try await tailscaleService.dial(host: server.host, port: server.port)
+                sshHost = "127.0.0.1"
+                sshPort = localPort
+                logger.info("Tailscale proxy: \(server.host):\(server.port) → 127.0.0.1:\(localPort)")
+            }
+
+            connectingStatus = "SSH handshake..."
             try await sshService.connect(
-                host: server.host,
-                port: server.port,
+                host: sshHost,
+                port: sshPort,
                 username: server.username,
                 auth: auth,
                 expectedFingerprint: server.hostKeyFingerprint
             )
+            connectingStatus = "SSH OK. tmux check..."
             logger.info("SSH connected, querying tmux sessions...")
 
-            // Check tmux availability before querying sessions.
-            try await checkTmuxAvailability()
+            // Skip exec-based tmux check for Tailscale connections —
+            // exec channels have latency issues through the local TCP proxy.
+            // The shell channel (used by tmux -CC attach) works reliably.
+            if !server.useTailscale {
+                // Check tmux availability before querying sessions.
+                try await checkTmuxAvailability()
+            }
 
-            // Query tmux sessions. Use server-side timeout to guard against
-            // a stuck tmux server socket (the command hangs if the tmux
-            // server process is zombie/unresponsive).
-            let output = try await sshService.execCommand(
-                "timeout 5 tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}' 2>/dev/null || true"
-            )
-            sessions = TmuxControlService.parseFormattedSessionList(output)
-            logger.info("Found \(self.sessions.count) tmux sessions")
-
-            // Auto-select session: last-used > first available > create new
             let serverID = server.id.uuidString
             let targetSession: String
 
-            if let lastUsed = lastSessionStore.lastSessionName(forServerID: serverID),
-               sessions.contains(where: { $0.name == lastUsed }) {
-                targetSession = lastUsed
-                logger.info("Resuming last-used session: \(lastUsed)")
-            } else if let first = sessions.first {
-                targetSession = first.name
-                logger.info("Attaching to first session: \(targetSession)")
+            if server.useTailscale {
+                // Tailscale path: skip exec-based session listing (exec channels
+                // have issues through the local TCP proxy). Use shell command:
+                // "tmux -CC attach || tmux -CC new-session"
+                // → attaches to most recent session if any exist, creates new if none.
+                connectingStatus = "tmux attach..."
+                targetSession = ""  // empty = use attach||new-session shell fallback
+                logger.info("Tailscale: attach-or-create via shell fallback (skip exec)")
             } else {
-                // No sessions or tmux server was stuck — kill stale server and create fresh.
-                logger.info("No sessions found, creating new session...")
-                let newSessionOutput = try await sshService.execCommand(
-                    "tmux kill-server 2>/dev/null; tmux new-session -d -P -F '#{session_name}'"
+                // Direct path: query tmux sessions via exec channel.
+                let output = try await sshService.execCommand(
+                    "timeout 5 tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}' 2>/dev/null || true"
                 )
-                targetSession = newSessionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-                logger.info("Created new session: \(targetSession)")
-                // Refresh to populate sessions array
-                let refreshed = try await sshService.execCommand(
-                    "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}' 2>/dev/null || true"
-                )
-                sessions = TmuxControlService.parseFormattedSessionList(refreshed)
+                sessions = TmuxControlService.parseFormattedSessionList(output)
+                logger.info("Found \(self.sessions.count) tmux sessions")
+
+                if let lastUsed = lastSessionStore.lastSessionName(forServerID: serverID),
+                   sessions.contains(where: { $0.name == lastUsed }) {
+                    targetSession = lastUsed
+                    logger.info("Resuming last-used session: \(lastUsed)")
+                } else if let first = sessions.first {
+                    targetSession = first.name
+                    logger.info("Attaching to first session: \(targetSession)")
+                } else {
+                    logger.info("No sessions found, creating new session...")
+                    let newSessionOutput = try await sshService.execCommand(
+                        "tmux kill-server 2>/dev/null; tmux new-session -d -P -F '#{session_name}'"
+                    )
+                    targetSession = newSessionOutput.trimmingCharacters(in: .whitespacesAndNewlines)
+                    logger.info("Created new session: \(targetSession)")
+                    let refreshed = try await sshService.execCommand(
+                        "tmux list-sessions -F '#{session_id}:#{session_name}:#{session_windows}:#{session_activity}' 2>/dev/null || true"
+                    )
+                    sessions = TmuxControlService.parseFormattedSessionList(refreshed)
+                }
             }
 
-            try await performAttach(sessionName: targetSession)
+            try await performAttach(sessionName: targetSession, attachOrCreate: server.useTailscale)
             lastSessionStore.save(sessionName: targetSession, forServerID: serverID)
 
         } catch let error as SSHHostKeyError {
@@ -455,6 +492,28 @@ final class ConnectionManager {
             cachedAuth = nil
             throw error
         }
+    }
+
+    // MARK: - Tailscale Lifecycle
+
+    /// Start the embedded Tailscale node.
+    func startTailscale(controlURL: String, authKey: String, hostname: String) async {
+        do {
+            tailscaleState = .connecting
+            try await tailscaleService.start(controlURL: controlURL, authKey: authKey, hostname: hostname)
+            tailscaleState = .connected
+            logger.info("Tailscale connected")
+        } catch {
+            tailscaleState = .error(error.localizedDescription)
+            logger.error("Tailscale start failed: \(error)")
+        }
+    }
+
+    /// Stop the embedded Tailscale node.
+    func stopTailscale() async {
+        await tailscaleService.stop()
+        tailscaleState = .disconnected
+        logger.info("Tailscale disconnected")
     }
 
     /// Handle host key verification errors during the connect flow.
@@ -659,7 +718,7 @@ final class ConnectionManager {
 
     /// Core attach logic: wire callbacks, open shell, send tmux -CC attach.
     /// Callers must ensure previous channel is cleaned up before calling.
-    private func performAttach(sessionName: String) async throws {
+    private func performAttach(sessionName: String, attachOrCreate: Bool = false) async throws {
         wireCallbacks()
 
         let channel = try await sshService.startShell(onData: { [weak self] data in
@@ -669,7 +728,14 @@ final class ConnectionManager {
         })
         activeChannel = channel
 
-        let command = "tmux -CC attach -t \(sessionName.shellEscaped())\n"
+        let command: String
+        if attachOrCreate {
+            // Attach to most recent session, or create new if none exist.
+            // No exec channel needed — works entirely through the shell.
+            command = "tmux -CC attach 2>/dev/null || tmux -CC new-session\n"
+        } else {
+            command = "tmux -CC attach -t \(sessionName.shellEscaped())\n"
+        }
         try await sshService.writeToChannel(Data(command.utf8))
         state = .attached(sessionName: sessionName)
 
@@ -1279,7 +1345,7 @@ final class ConnectionManager {
     private func checkTmuxAvailability() async throws {
         let output: String
         do {
-            output = try await sshService.execCommand("tmux -V")
+            output = try await sshService.execCommand("bash -lc 'tmux -V'")
         } catch {
             // execCommand failure (e.g. command not found exit code) → not installed.
             throw TmuxError.notInstalled
